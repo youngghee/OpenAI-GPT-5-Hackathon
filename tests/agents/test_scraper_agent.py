@@ -170,3 +170,39 @@ def test_candidate_urls_influence_tasks() -> None:
     assert "google" in topics
     assert any("pigglywiggly.com" in topic for topic in topics)
     assert any("facebook.com" in topic for topic in topics)
+
+
+def test_company_context_injected_into_queries() -> None:
+    agent = ScraperAgent(
+        search_client=_SearchClientStub(responses={}),
+        evidence_sink=_SinkStub(),
+    )
+
+    tasks = agent.plan_research(
+        question="employee count",
+        missing_facts={"record_context": {"BUSINESS_NAME": "Piggly Wiggly"}},
+    )
+
+    google_task = next(task for task in tasks if task.topic == "google")
+    assert '"Piggly Wiggly"' in google_task.query
+    assert all("{Company" not in task.query for task in tasks)
+
+
+def test_llm_placeholders_replaced_with_company() -> None:
+    llm = _LLMStub(
+        "LinkedIn company page|site:linkedin.com/company \"{Company Name}\"|Check LinkedIn headcount"
+    )
+    agent = ScraperAgent(
+        search_client=_SearchClientStub(responses={}),
+        evidence_sink=_SinkStub(),
+        llm_client=llm,
+    )
+
+    tasks = agent.plan_research(
+        question="employee count",
+        missing_facts={"record_context": {"BUSINESS_NAME": "Piggly Wiggly"}},
+        ticket_id="T-ctx",
+    )
+
+    assert any("Piggly Wiggly" in task.query for task in tasks if "linkedin" in task.query.lower())
+    assert llm.calls

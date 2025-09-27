@@ -95,6 +95,9 @@ def test_answer_question_flags_unknown_question() -> None:
 
     assert result["status"] == "unknown_question"
     assert flagger.calls and flagger.calls[0]["facts"]["reason"] == "unknown_question"
+    assert result.get("record_context", {}).get("BUSINESS_NAME") == "Cafe Example"
+    context = flagger.calls[0]["facts"].get("record_context")
+    assert context and context.get("BUSINESS_NAME") == "Cafe Example"
 
 
 def test_answer_question_flags_missing_value_when_column_empty() -> None:

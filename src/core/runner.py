@@ -169,6 +169,9 @@ def _augment_with_scraper(
     candidate_urls = result.get("candidate_urls")
     if isinstance(candidate_urls, list):
         missing_facts["candidate_urls"] = candidate_urls
+    record_context = result.get("record_context")
+    if isinstance(record_context, dict) and record_context:
+        missing_facts["record_context"] = record_context
     outcome = dependencies.scraper_agent.execute_plan(
         ticket_id=ticket_id,
         question=question,

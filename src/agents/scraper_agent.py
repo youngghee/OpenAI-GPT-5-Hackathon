@@ -77,14 +77,18 @@ class ScraperAgent:
         candidate_urls = (
             missing_facts.get("candidate_urls") if isinstance(missing_facts, dict) else None
         )
+        record_context = (
+            missing_facts.get("record_context") if isinstance(missing_facts, dict) else None
+        )
+        company_name = self._extract_company_name(record_context)
 
         tasks: list[SearchTask] = []
         if question:
             tasks.append(
                 SearchTask(
-                    query=f'"{question}"',
+                    query=self._compose_google_query(question, company_name),
                     topic="google",
-                    description="General Google search for the question",
+                    description="General Google search scoped to the company",
                 )
             )
 
@@ -94,6 +98,7 @@ class ScraperAgent:
             llm_tasks = self._plan_with_llm(
                 question=question,
                 missing_columns=missing_columns,
+                record_context=record_context if isinstance(record_context, dict) else None,
                 ticket_id=ticket_id,
             )
             if llm_tasks:
@@ -102,7 +107,14 @@ class ScraperAgent:
         if missing_columns:
             for column in missing_columns:
                 readable = column.replace("_", " ").strip().lower()
-                query = f"{question} {readable}" if readable else question
+                query_terms: list[str] = []
+                if company_name:
+                    query_terms.append(f'"{company_name}"')
+                if question:
+                    query_terms.append(question)
+                if readable:
+                    query_terms.append(readable)
+                query = " ".join(filter(None, query_terms)) or question
                 tasks.append(
                     SearchTask(
                         query=query,
@@ -114,11 +126,15 @@ class ScraperAgent:
             # If we have no specific missing columns or URLs, add a general follow-up search.
             tasks.append(
                 SearchTask(
-                    query=question or "company background",
+                    query=(f'"{company_name}" {question}' if company_name else question)
+                    or "company background",
                     topic="general",
                     description="General context gathering for unanswered question",
                 )
             )
+
+        if company_name:
+            self._inject_company_name(tasks, company_name)
 
         self._log_event(
             ticket_id=ticket_id,
@@ -201,11 +217,13 @@ class ScraperAgent:
         *,
         question: str,
         missing_columns: list[str],
+        record_context: dict[str, Any] | None,
         ticket_id: str | None,
     ) -> list[SearchTask]:
         if self.llm_client is None:
             return []
         column_text = ", ".join(missing_columns) if missing_columns else "none"
+        context_lines = self._format_record_context(record_context)
         messages = [
             {
                 "role": "system",
@@ -219,6 +237,7 @@ class ScraperAgent:
                 "role": "user",
                 "content": (
                     f"Question: {question}\nMissing columns: {column_text}\n"
+                    f"Company context: {context_lines}\n"
                     "Generate focused search directives."
                 ),
             },
@@ -281,6 +300,59 @@ class ScraperAgent:
     }
 
     @staticmethod
+    def _extract_company_name(record_context: dict[str, Any] | None) -> str | None:
+        if not record_context:
+            return None
+        preferred_keys = (
+            "BUSINESS_NAME",
+            "ALTERNATE_NAME",
+            "CHAIN_NAME",
+            "PARENT_NAME",
+        )
+        for key in preferred_keys:
+            value = record_context.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if value:
+                return str(value)
+        return None
+
+    @staticmethod
+    def _compose_google_query(question: str, company_name: str | None) -> str:
+        question = question.strip()
+        if company_name:
+            base = f'"{company_name}"'
+            return f"{base} {question}" if question else base
+        return f'"{question}"' if question else question
+
+    @staticmethod
+    def _format_record_context(record_context: dict[str, Any] | None) -> str:
+        if not record_context:
+            return "none"
+        parts = []
+        for key, value in record_context.items():
+            if value is None:
+                continue
+            parts.append(f"{key}: {value}")
+        return "; ".join(parts) if parts else "none"
+
+    @staticmethod
+    def _inject_company_name(tasks: list[SearchTask], company_name: str) -> None:
+        replacements = {
+            "{company}": company_name,
+            "{Company}": company_name,
+            "{company name}": company_name,
+            "{Company Name}": company_name,
+            "{business}": company_name,
+            "{Business}": company_name,
+        }
+
+        for task in tasks:
+            task.query = ScraperAgent._replace_placeholders(task.query, replacements)
+            task.description = ScraperAgent._replace_placeholders(task.description, replacements)
+            task.topic = ScraperAgent._replace_placeholders(task.topic, replacements)
+
+    @staticmethod
     def _parse_llm_plan(response: Any) -> list[SearchTask]:  # pragma: no cover - exercised via tests
         lines: list[str] = []
         output = getattr(response, "output", [])
@@ -308,3 +380,12 @@ class ScraperAgent:
                 continue
             tasks.append(SearchTask(topic=topic, query=query, description=description))
         return tasks
+
+    @staticmethod
+    def _replace_placeholders(value: str, replacements: dict[str, str]) -> str:
+        if not value:
+            return value
+        result = value
+        for placeholder, actual in replacements.items():
+            result = result.replace(placeholder, actual)
+        return result

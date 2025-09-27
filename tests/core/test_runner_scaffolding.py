@@ -219,7 +219,13 @@ def test_scraper_receives_candidate_urls() -> None:
         ]
     )
     executor = _SQLExecutorStub(
-        dataset={"row-url": {"BRIZO_ID": "row-url", "LINK": "example.com"}}
+        dataset={
+            "row-url": {
+                "BRIZO_ID": "row-url",
+                "LINK": "example.com",
+                "BUSINESS_NAME": "Cafe Example",
+            }
+        }
     )
     flagger = _FlaggerStub()
     scraper = _ScraperStub(outcome=ScrapeOutcome(tasks=[], findings=[]))
@@ -242,6 +248,8 @@ def test_scraper_receives_candidate_urls() -> None:
     assert scraper.calls, "Scraper should be invoked for unanswered questions"
     missing_facts = scraper.calls[0]["missing_facts"]
     assert missing_facts.get("candidate_urls") == ["https://example.com"]
+    context = missing_facts.get("record_context")
+    assert context and context.get("BUSINESS_NAME") == "Cafe Example"
 
 
 def test_yaml_scenario_loader_reads_profiles(tmp_path) -> None:

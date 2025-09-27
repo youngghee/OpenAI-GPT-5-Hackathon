@@ -29,6 +29,16 @@ DEFAULT_SYNONYMS: dict[str, set[str]] = {
     "LOCATION_COUNTRY": {"country"},
 }
 
+DEFAULT_CONTEXT_COLUMNS: tuple[str, ...] = (
+    "BUSINESS_NAME",
+    "ALTERNATE_NAME",
+    "PARENT_NAME",
+    "CHAIN_NAME",
+    "LOCATION_CITY",
+    "LOCATION_STATE_CODE",
+    "LOCATION_COUNTRY",
+)
+
 
 class SQLExecutor(Protocol):
     """Abstracts a SQL execution engine (e.g., Codex interpreter)."""
@@ -58,6 +68,7 @@ class QueryAgent:
     max_columns: int = 3
     logger: QueryObservationSink | None = None
     candidate_url_fields: list[str] | None = None
+    context_columns: list[str] | None = None
 
     def answer_question(self, *, ticket_id: str, question: str, record_id: str) -> dict[str, Any]:
         """Return a structured answer for the provided question."""
@@ -70,6 +81,7 @@ class QueryAgent:
 
         row = self._fetch_record(ticket_id, record_id)
         candidate_urls = self._extract_candidate_urls(row) if row else []
+        record_context = self._build_record_context(row)
         if row is None:
             self._flag_missing(
                 ticket_id, question, {"reason": "record_not_found", "record_id": record_id}
@@ -95,13 +107,19 @@ class QueryAgent:
             {"record_id": record_id, "columns": columns},
         )
         if not columns:
-            self._flag_missing(ticket_id, question, {"reason": "unknown_question"})
+            facts = {"reason": "unknown_question"}
+            if candidate_urls:
+                facts["candidate_urls"] = candidate_urls
+            if record_context:
+                facts["record_context"] = record_context
+            self._flag_missing(ticket_id, question, facts)
             result = {
                 "ticket_id": ticket_id,
                 "record_id": record_id,
                 "question": question,
                 "status": "unknown_question",
                 "candidate_urls": candidate_urls,
+                "record_context": record_context,
             }
             self._log_event(
                 ticket_id,
@@ -112,11 +130,12 @@ class QueryAgent:
 
         answers = self._resolve_answers(ticket_id, question, row, columns)
         if not answers:
-            self._flag_missing(
-                ticket_id,
-                question,
-                {"reason": "missing_values", "missing_columns": columns},
-            )
+            facts = {"reason": "missing_values", "missing_columns": columns}
+            if candidate_urls:
+                facts["candidate_urls"] = candidate_urls
+            if record_context:
+                facts["record_context"] = record_context
+            self._flag_missing(ticket_id, question, facts)
             result = {
                 "ticket_id": ticket_id,
                 "record_id": record_id,
@@ -124,6 +143,7 @@ class QueryAgent:
                 "status": "missing_values",
                 "missing_columns": columns,
                 "candidate_urls": candidate_urls,
+                "record_context": record_context,
             }
             self._log_event(
                 ticket_id,
@@ -145,6 +165,8 @@ class QueryAgent:
             "answers": answers,
             "candidate_urls": candidate_urls,
         }
+        if record_context:
+            result["record_context"] = record_context
         self._log_event(
             ticket_id,
             "question_resolved",
@@ -394,3 +416,25 @@ class QueryAgent:
         else:
             base = f"https://{text}"
         return base.rstrip("/")
+
+    def _build_record_context(self, row: dict[str, Any] | None) -> dict[str, Any]:
+        if not row:
+            return {}
+        columns = self.context_columns or list(DEFAULT_CONTEXT_COLUMNS)
+        context: dict[str, Any] = {}
+        for column in columns:
+            value = row.get(column)
+            if value is None:
+                continue
+            if isinstance(value, str) and self._is_missing_text(value):
+                continue
+            context[column] = value
+        return context
+
+    @staticmethod
+    def _is_missing_text(value: str) -> bool:
+        stripped = value.strip()
+        if not stripped:
+            return True
+        lowered = stripped.lower()
+        return lowered in {"na", "n/a", "none", "null", "nan"}
