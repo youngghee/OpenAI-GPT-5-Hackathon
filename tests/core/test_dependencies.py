@@ -114,7 +114,10 @@ def test_candidate_url_fields_detected(
 ) -> None:
     csv_file = tmp_path / "records.csv"
     csv_file.write_text(
-        "BRIZO_ID,LINK,YELP_LINK,NOTES\nrow-1,https://example.com,https://yelp.com/biz/example,info\n",
+        (
+            "BRIZO_ID,LINK,YELP_LINK,BRIZO_WEBSITE,NOTES\n"
+            "row-1,https://example.com,https://yelp.com/biz/example,pigglywiggly.com,info\n"
+        ),
         encoding="utf-8",
     )
     base_settings.csv_source = CSVSourceSettings(path_env="CSV_DATA_PATH", table_name="records")
@@ -122,4 +125,4 @@ def test_candidate_url_fields_detected(
 
     deps = build_dependencies(base_settings)
 
-    assert set(deps.candidate_url_fields or []) == {"LINK", "YELP_LINK"}
+    assert set(deps.candidate_url_fields or []) == {"LINK", "YELP_LINK", "BRIZO_WEBSITE"}

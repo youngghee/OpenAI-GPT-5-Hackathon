@@ -219,6 +219,9 @@ def _build_agent_client(
 URL_FIELD_HINTS = {
     "LINK",
     "WEBSITE",
+    "BRIZO_WEBSITE",
+    "PARENT_URL",
+    "CHAIN_URL",
     "GOOGLEMAPS_LINK",
     "YELP_LINK",
     "TRIPADVISOR_LINK",

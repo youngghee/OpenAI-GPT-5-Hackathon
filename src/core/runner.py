@@ -123,6 +123,7 @@ def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> 
         primary_key_column=primary_key,
         table_name=table_name,
         logger=dependencies.query_logger,
+        candidate_url_fields=dependencies.candidate_url_fields,
     )
 
     result = agent.answer_question(
@@ -165,6 +166,9 @@ def _augment_with_scraper(
     missing_facts: dict[str, Any] = {"status": result.get("status")}
     if "missing_columns" in result:
         missing_facts["missing_columns"] = result["missing_columns"]
+    candidate_urls = result.get("candidate_urls")
+    if isinstance(candidate_urls, list):
+        missing_facts["candidate_urls"] = candidate_urls
     outcome = dependencies.scraper_agent.execute_plan(
         ticket_id=ticket_id,
         question=question,

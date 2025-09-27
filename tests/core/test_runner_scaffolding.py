@@ -208,6 +208,42 @@ def test_runner_invokes_schema_agent_on_escalation() -> None:
     assert "schema_proposal" in result
 
 
+def test_scraper_receives_candidate_urls() -> None:
+    loader = _ScenarioLoaderStub(
+        scenarios=[
+            {
+                "ticket_id": "T-4",
+                "question": "How many employees?",
+                "record_id": "row-url",
+            }
+        ]
+    )
+    executor = _SQLExecutorStub(
+        dataset={"row-url": {"BRIZO_ID": "row-url", "LINK": "example.com"}}
+    )
+    flagger = _FlaggerStub()
+    scraper = _ScraperStub(outcome=ScrapeOutcome(tasks=[], findings=[]))
+    updater = _UpdateAgentStub()
+    schema_agent = _SchemaAgentStub()
+    deps = RunnerDependencies(
+        sql_executor=executor,
+        missing_data_flagger=flagger,
+        scraper_agent=scraper,
+        update_agent=updater,
+        schema_agent=schema_agent,
+        candidate_url_fields=["LINK"],
+    )
+
+    runner = Runner(scenario_loader=loader, dependencies=deps)
+
+    results = runner.execute(profile="dev")
+
+    assert results and results[0]["status"] == "unknown_question"
+    assert scraper.calls, "Scraper should be invoked for unanswered questions"
+    missing_facts = scraper.calls[0]["missing_facts"]
+    assert missing_facts.get("candidate_urls") == ["https://example.com"]
+
+
 def test_yaml_scenario_loader_reads_profiles(tmp_path) -> None:
     scenarios_dir = tmp_path / "scenarios"
     scenarios_dir.mkdir()
