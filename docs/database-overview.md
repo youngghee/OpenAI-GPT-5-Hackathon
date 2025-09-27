@@ -10,6 +10,8 @@ agent to behave as if it were connected to a warehouse.
 - Loads header metadata and normalizes column lookups.
 - Supports equality filters plus optional `LIMIT` clauses.
 - Returns dictionaries keyed by CSV column names, preserving casing.
+- Companion inspector (`python -m src.integrations.csv_dataset /path/to/export.csv`)
+  reports column lists, row counts, and sample rows for quick sanity checks.
 
 ## Operational Caveats
 - Complex SQL (joins, aggregates, nested queries) is not supported in the CSV
