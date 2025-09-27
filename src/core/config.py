@@ -45,12 +45,21 @@ class AgentSettings:
 
 
 @dataclass(slots=True)
+class SearchSettings:
+    provider: str
+    model_id: str
+    max_results: int
+    api_key_env: str
+
+
+@dataclass(slots=True)
 class Settings:
     model_id: str
     codex_id: str
     scraper: ScraperSettings
     csv_source: CSVSourceSettings | None
     paths: PathsSettings | None
+    search: SearchSettings | None
     agents: dict[str, AgentSettings]
 
 
@@ -92,6 +101,16 @@ def load_settings(path: str | Path) -> Settings:
             migrations_dir=str(migrations_dir) if migrations_dir else None,
         )
 
+    search_raw = raw.get("search")
+    search = None
+    if search_raw:
+        search = SearchSettings(
+            provider=str(search_raw.get("provider", "")).lower(),
+            model_id=str(search_raw.get("model_id", "")),
+            max_results=int(search_raw.get("max_results", 5)),
+            api_key_env=str(search_raw.get("api_key_env", "OPENAI_API_KEY")),
+        )
+
     agents_raw = raw.get("agents", {})
     agents: dict[str, AgentSettings] = {}
     for name, values in agents_raw.items():
@@ -106,5 +125,6 @@ def load_settings(path: str | Path) -> Settings:
         scraper=scraper,
         csv_source=csv_source,
         paths=paths,
+        search=search,
         agents=agents,
     )

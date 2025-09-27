@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from src.core.missing_data import JSONLMissingDataFlagger
 from src.core.schema import JSONLSchemaEscalator
 from src.integrations.csv_sql_executor import CsvSQLExecutor
 from src.integrations.in_memory_sql_executor import InMemorySQLExecutor
+from src.integrations.openai_search import OpenAIWebSearchClient
 
 
 @dataclass(slots=True)
@@ -42,7 +44,7 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
     scrapes_dir = _resolve_scrapes_dir(settings)
     flagger = JSONLMissingDataFlagger(base_dir=scrapes_dir)
     evidence_sink = JSONLEvidenceSink(base_dir=scrapes_dir)
-    search_client: SearchClient = NullSearchClient()
+    search_client: SearchClient = _build_search_client(settings)
     scraper_agent = ScraperAgent(search_client=search_client, evidence_sink=evidence_sink)
 
     schema_dir = _resolve_schema_dir(settings)
@@ -82,6 +84,19 @@ class NullSearchClient(SearchClient):
 
     def search(self, query: str, *, limit: int | None = None):  # type: ignore[override]
         return []
+
+
+def _build_search_client(settings: Settings) -> SearchClient:
+    search_settings = settings.search
+    if search_settings and search_settings.provider == "openai":
+        api_key = os.getenv(search_settings.api_key_env, "")
+        if api_key:
+            return OpenAIWebSearchClient(
+                model=search_settings.model_id,
+                api_key=api_key,
+                max_results=search_settings.max_results,
+            )
+    return NullSearchClient()
 
 
 def _resolve_schema_dir(settings: Settings) -> Path:

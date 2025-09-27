@@ -12,6 +12,8 @@
 ## Responsibilities
 - Translate `flag_missing` payloads into focused research plans.
 - Coordinate optional subagents to gather and normalize evidence.
+- Call the OpenAI Responses API web-search tool when configured (`search.provider: openai`)
+  to retrieve canonical snippets and metadata.
 - Persist findings to `assets/scrapes/<ticket>.jsonl` with provenance metadata via the shared JSONL evidence sink.
 - Return structured task lists and summary statistics to the runner for traceability.
 

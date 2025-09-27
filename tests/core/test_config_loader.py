@@ -55,6 +55,11 @@ paths:
   scrapes_dir: assets/scrapes
   schema_escalations_dir: schema/escalations
   migrations_dir: schema/migrations
+search:
+  provider: openai
+  model_id: gpt-4.1-mini
+  max_results: 7
+  api_key_env: OPENAI_API_KEY
 agents: {}
         """,
         encoding="utf-8",
@@ -68,3 +73,6 @@ agents: {}
     assert settings.paths.scrapes_dir == "assets/scrapes"
     assert settings.paths.schema_escalations_dir == "schema/escalations"
     assert settings.paths.migrations_dir == "schema/migrations"
+    assert settings.search is not None
+    assert settings.search.provider == "openai"
+    assert settings.search.max_results == 7
