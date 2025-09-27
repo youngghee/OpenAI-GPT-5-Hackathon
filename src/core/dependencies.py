@@ -40,7 +40,8 @@ class RunnerDependencies:
     schema_agent: SchemaAgent | None = None
     query_logger: QueryObservationSink | None = None
     scraper_logger: ScraperObservationSink | None = None
-    gpt_client: GPTResponseClient | None = None
+    gpt_client: OpenAIAgentAdapter | None = None
+    candidate_url_fields: list[str] | None = None
 
 
 def build_dependencies(settings: Settings) -> RunnerDependencies:
@@ -80,13 +81,14 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
 
     query_logs_dir = _resolve_query_logs_dir(settings)
     query_logger = JSONLQueryLogger(base_dir=query_logs_dir)
-    gpt_client = _build_response_client(settings)
-    agent_client = _build_agent_client(settings, gpt_client)
+    response_client = _build_response_client(settings)
+    agent_client = _build_agent_client(settings, response_client)
+    candidate_url_fields = _detect_candidate_url_fields(executor)
 
-    if gpt_client is not None:
-        scraper_agent.llm_client = gpt_client
-        update_agent.llm_client = gpt_client
-        schema_agent.llm_client = gpt_client
+    if agent_client is not None:
+        scraper_agent.llm_client = agent_client
+        update_agent.llm_client = agent_client
+        schema_agent.llm_client = agent_client
 
     return RunnerDependencies(
         sql_executor=executor,
@@ -97,6 +99,7 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
         query_logger=query_logger,
         scraper_logger=scraper_logger,
         gpt_client=agent_client,
+        candidate_url_fields=candidate_url_fields,
     )
 
 
@@ -204,9 +207,48 @@ def _build_response_client(settings: Settings) -> GPTResponseClient | None:
 def _build_agent_client(
     settings: Settings, fallback: GPTResponseClient | None
 ) -> OpenAIAgentAdapter | None:
-    if not settings.response_model_id or fallback is None:
-        return fallback
+    if fallback is None:
+        return None
+    model_id = settings.response_model_id or fallback.model
     try:
-        return OpenAIAgentAdapter(model=settings.response_model_id, fallback=fallback)
+        return OpenAIAgentAdapter(model=model_id, fallback=fallback)
     except Exception:
-        return fallback
+        return None
+
+
+URL_FIELD_HINTS = {
+    "LINK",
+    "WEBSITE",
+    "GOOGLEMAPS_LINK",
+    "YELP_LINK",
+    "TRIPADVISOR_LINK",
+    "INSTAGRAM_LINK",
+    "FACEBOOK_LINK",
+    "DOORDASH_LINK",
+    "UBEREATS_LINK",
+    "GRUBHUB_LINK",
+    "EZCATER_LINK",
+    "OPENTABLE_LINK",
+    "SLICE_LINK",
+}
+
+URL_FIELD_EXACT_IGNORE = {"INTERNAL_URLS", "EXTERNAL_URLS"}
+URL_FIELD_PARTIAL_IGNORE = {"LOGO", "IMAGE", "PHOTO"}
+
+
+def _detect_candidate_url_fields(executor: SQLExecutor) -> list[str]:
+    if isinstance(executor, CsvSQLExecutor):
+        columns = executor.columns
+    else:
+        return []
+
+    selected: list[str] = []
+    for column in columns:
+        upper = column.upper()
+        if upper in URL_FIELD_EXACT_IGNORE:
+            continue
+        if any(part in upper for part in URL_FIELD_PARTIAL_IGNORE):
+            continue
+        if upper in URL_FIELD_HINTS:
+            selected.append(column)
+    return selected

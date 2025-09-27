@@ -11,6 +11,7 @@
 
 ## Responsibilities
 - Translate `flag_missing` payloads into focused research plans. When configured with the GPT-5 Responses model (`response_model_id`), the agent asks the LLM—via the OpenAI Agents SDK when available—to draft targeted search directives before falling back to rule-based heuristics.
+- Seed each plan with a general Google query and `site:` searches derived from record URLs (link, Yelp, delivery platforms) while skipping internal domains.
 - Coordinate optional subagents to gather and normalize evidence.
 - Call the OpenAI Responses API web-search tool when configured (`search.provider: openai`)
   to retrieve canonical snippets and metadata.

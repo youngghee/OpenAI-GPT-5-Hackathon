@@ -56,6 +56,7 @@ flowchart TD
 - Set `CSV_DATA_PATH` in `.env` to point at the latest export; use `python -m src.integrations.csv_dataset <path>` to validate column coverage before each run.
 - Set `OPENAI_API_KEY` in `.env` (or the variable referenced by `search.api_key_env`) to enable the web-search tool.
 - Configure agent model overrides via `configs/{environment}.yaml` (`model_id`, `codex_id`, `response_model_id` set to the GPT-5 Responses/Agents model, and `search.model_id`).
+- Exported URL columns (e.g., `LINK`, `GOOGLEMAPS_LINK`, `YELP_LINK`, delivery platforms) are automatically passed to the scraper so each plan includes both a general Google query and `site:` searches for those domains.
 - Review structured observability traces under `logs/query/<ticket>.jsonl` and `logs/scraper/<ticket>.jsonl` (configurable via `paths.query_logs_dir` and `paths.scraper_logs_dir`) to debug agent behaviour.
 
 ## Chat Interface

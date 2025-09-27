@@ -96,3 +96,9 @@ class CsvSQLExecutor:
         if not resolved:
             raise ValueError("No valid columns specified in SELECT clause")
         return resolved
+
+    @property
+    def columns(self) -> list[str]:
+        """Return the original CSV column names."""
+
+        return list(self._field_map.values())
