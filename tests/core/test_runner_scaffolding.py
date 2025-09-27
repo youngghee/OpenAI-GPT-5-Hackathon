@@ -7,7 +7,6 @@ from typing import Any
 
 from src.agents.query_agent import MissingDataFlagger, SQLExecutor
 from src.agents.scraper_agent import ScrapeOutcome, SearchTask
-from src.agents.update_agent import UpdateAgent
 from src.core.dependencies import RunnerDependencies
 from src.core.runner import Runner, YamlScenarioLoader
 
@@ -58,17 +57,36 @@ class _ScraperStub:
 
 
 @dataclass
-class _UpdateAgentStub(UpdateAgent):
+class _UpdateAgentStub:
     summaries: list[dict[str, Any]] = field(default_factory=list)
 
-    def apply_enrichment(self, *, ticket_id: str, record_id: str, enriched_fields: dict[str, Any]) -> dict[str, Any]:  # type: ignore[override]
+    def apply_enrichment(
+        self, *, ticket_id: str, record_id: str, enriched_fields: dict[str, Any]
+    ) -> dict[str, Any]:
         summary = {
             "ticket_id": ticket_id,
             "record_id": record_id,
             "fields": enriched_fields,
         }
         self.summaries.append(summary)
-        return {"status": "simulated", "fields": enriched_fields}
+        response: dict[str, Any] = {"status": "simulated", "fields": enriched_fields}
+        unknown = {key: value for key, value in enriched_fields.items() if key.startswith("NEW")}
+        if unknown:
+            response["escalated"] = {"unknown_fields": unknown}
+        return response
+
+
+@dataclass
+class _SchemaAgentStub:
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def propose_change(self, *, ticket_id: str, evidence_summary: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append({"ticket_id": ticket_id, "evidence_summary": evidence_summary})
+        return {
+            "ticket_id": ticket_id,
+            "columns": ["NEW_FIELD"],
+            "migration_path": "schema/migrations/test.sql",
+        }
 
 
 def test_runner_executes_scenarios() -> None:
@@ -84,12 +102,14 @@ def test_runner_executes_scenarios() -> None:
     executor = _SQLExecutorStub(dataset={"row-1": {"BRIZO_ID": "row-1", "BUSINESS_NAME": "Cafe"}})
     flagger = _FlaggerStub()
     scraper = _ScraperStub(outcome=ScrapeOutcome(tasks=[], findings=[]))
-    updater = _UpdateAgentStub(crm_client=None, schema_escalator=None)  # type: ignore[arg-type]
+    updater = _UpdateAgentStub()
+    schema_agent = _SchemaAgentStub()
     deps = RunnerDependencies(
         sql_executor=executor,
         missing_data_flagger=flagger,
         scraper_agent=scraper,
         update_agent=updater,
+        schema_agent=schema_agent,
     )
 
     runner = Runner(scenario_loader=loader, dependencies=deps)
@@ -104,6 +124,7 @@ def test_runner_executes_scenarios() -> None:
     assert not flagger.calls
     assert not scraper.calls
     assert updater.summaries and updater.summaries[0]["fields"] == {"BUSINESS_NAME": "Cafe"}
+    assert not schema_agent.calls
 
 
 def test_runner_flags_missing_records(tmp_path) -> None:
@@ -130,12 +151,14 @@ def test_runner_flags_missing_records(tmp_path) -> None:
             findings=[{"url": "https://example.com"}],
         )
     )
-    updater = _UpdateAgentStub(crm_client=None, schema_escalator=None)  # type: ignore[arg-type]
+    updater = _UpdateAgentStub()
+    schema_agent = _SchemaAgentStub()
     deps = RunnerDependencies(
         sql_executor=executor,
         missing_data_flagger=flagger,
         scraper_agent=scraper,
         update_agent=updater,
+        schema_agent=schema_agent,
     )
 
     runner = Runner(scenario_loader=loader, dependencies=deps)
@@ -149,6 +172,40 @@ def test_runner_flags_missing_records(tmp_path) -> None:
     assert result["scraper_tasks"][0]["topic"] == "general"
     assert result["scraper_findings"] == 1
     assert not updater.summaries
+    assert not schema_agent.calls
+
+
+def test_runner_invokes_schema_agent_on_escalation() -> None:
+    loader = _ScenarioLoaderStub(
+        scenarios=[
+            {
+                "ticket_id": "T-3",
+                "question": "What is the business name?",
+                "record_id": "row-2",
+                "enriched_fields": {"NEW_METRIC": 12},
+            }
+        ]
+    )
+    executor = _SQLExecutorStub(dataset={"row-2": {"BRIZO_ID": "row-2", "BUSINESS_NAME": "Cafe"}})
+    flagger = _FlaggerStub()
+    scraper = _ScraperStub(outcome=ScrapeOutcome(tasks=[], findings=[]))
+    updater = _UpdateAgentStub()
+    schema_agent = _SchemaAgentStub()
+    deps = RunnerDependencies(
+        sql_executor=executor,
+        missing_data_flagger=flagger,
+        scraper_agent=scraper,
+        update_agent=updater,
+        schema_agent=schema_agent,
+    )
+
+    runner = Runner(scenario_loader=loader, dependencies=deps)
+
+    result = runner.execute(profile="dev")[0]
+
+    assert schema_agent.calls
+    assert schema_agent.calls[0]["ticket_id"] == "T-3"
+    assert "schema_proposal" in result
 
 
 def test_yaml_scenario_loader_reads_profiles(tmp_path) -> None:

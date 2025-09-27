@@ -64,6 +64,8 @@ class Runner:
             raise ValueError("Scraper agent dependency is required")
         if self.dependencies.update_agent is None:
             raise ValueError("Update agent dependency is required")
+        if self.dependencies.schema_agent is None:
+            raise ValueError("Schema agent dependency is required")
 
         scenarios = self.scenario_loader.load(profile)
         return [self._run_scenario(scenario) for scenario in scenarios]
@@ -93,6 +95,8 @@ class Runner:
             self._augment_with_scraper(ticket_id, question, result)
 
         enrichment_payload = self._resolve_enrichment_payload(result, scenario)
+        schema_proposal: dict[str, Any] | None = None
+
         if enrichment_payload:
             update_summary = self.dependencies.update_agent.apply_enrichment(
                 ticket_id=ticket_id,
@@ -100,6 +104,18 @@ class Runner:
                 enriched_fields=enrichment_payload,
             )
             result["update"] = update_summary
+
+            escalated = (
+                update_summary.get("escalated") if isinstance(update_summary, dict) else None
+            )
+            if escalated:
+                schema_proposal = self.dependencies.schema_agent.propose_change(
+                    ticket_id=ticket_id,
+                    evidence_summary=escalated,
+                )
+
+        if schema_proposal:
+            result["schema_proposal"] = schema_proposal
 
         return result
 

@@ -35,6 +35,7 @@ class CSVSourceSettings:
 class PathsSettings:
     scrapes_dir: str | None = None
     schema_escalations_dir: str | None = None
+    migrations_dir: str | None = None
 
 
 @dataclass(slots=True)
@@ -84,9 +85,11 @@ def load_settings(path: str | Path) -> Settings:
     if paths_raw:
         scrapes_dir = paths_raw.get("scrapes_dir")
         schema_dir = paths_raw.get("schema_escalations_dir")
+        migrations_dir = paths_raw.get("migrations_dir")
         paths = PathsSettings(
             scrapes_dir=str(scrapes_dir) if scrapes_dir else None,
             schema_escalations_dir=str(schema_dir) if schema_dir else None,
+            migrations_dir=str(migrations_dir) if migrations_dir else None,
         )
 
     agents_raw = raw.get("agents", {})

@@ -23,7 +23,7 @@ def base_settings() -> Settings:
         codex_id="gpt-5-codex-pro",
         scraper=ScraperSettings(rate_limit_per_min=30, default_timeout_s=15),
         csv_source=None,
-        paths=PathsSettings(scrapes_dir=None),
+        paths=PathsSettings(scrapes_dir=None, schema_escalations_dir=None, migrations_dir=None),
         agents={"query": AgentSettings(token_budget=1, safety_notes=[])},
     )
 
@@ -34,6 +34,8 @@ def test_build_dependencies_uses_in_memory_when_no_csv(base_settings: Settings) 
     assert deps.sql_executor is not None
     assert deps.missing_data_flagger is not None
     assert deps.scraper_agent is not None
+    assert deps.update_agent is not None
+    assert deps.schema_agent is not None
 
 
 def test_build_dependencies_uses_csv_path(
@@ -50,3 +52,5 @@ def test_build_dependencies_uses_csv_path(
     assert deps.sql_executor.__class__.__name__ == "CsvSQLExecutor"
     assert deps.missing_data_flagger is not None
     assert deps.scraper_agent is not None
+    assert deps.update_agent is not None
+    assert deps.schema_agent is not None

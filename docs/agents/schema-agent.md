@@ -11,8 +11,8 @@
 
 ## Responsibilities
 - Analyse unresolved enrichment tickets and identify schema gaps.
-- Propose new columns with data types, constraints, and documentation updates.
-- Generate Codex-authored migrations stored under `schema/` for later execution.
+- Propose new columns with inferred data types, nullable defaults, and documentation context.
+- Emit timestamped SQL migrations to `schema/migrations/` via the shared migration writer.
 
 ## Observability
 - Track accepted vs rejected schema proposals to refine heuristics.

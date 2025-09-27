@@ -6,6 +6,7 @@ scraper:
 paths:
   scrapes_dir: assets/scrapes
   schema_escalations_dir: schema/escalations
+  migrations_dir: schema/migrations
 data_sources:
   csv:
     path_env: CSV_DATA_PATH

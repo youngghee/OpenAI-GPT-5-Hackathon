@@ -54,6 +54,7 @@ data_sources:
 paths:
   scrapes_dir: assets/scrapes
   schema_escalations_dir: schema/escalations
+  migrations_dir: schema/migrations
 agents: {}
         """,
         encoding="utf-8",
@@ -66,3 +67,4 @@ agents: {}
     assert settings.paths is not None
     assert settings.paths.scrapes_dir == "assets/scrapes"
     assert settings.paths.schema_escalations_dir == "schema/escalations"
+    assert settings.paths.migrations_dir == "schema/migrations"
