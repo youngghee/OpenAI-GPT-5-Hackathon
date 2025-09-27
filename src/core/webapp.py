@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Literal
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -166,6 +166,7 @@ class DatasetService:
         self.table_name = settings.csv_source.table_name or DEFAULT_TABLE_NAME
         self.default_primary_key = DEFAULT_PRIMARY_KEY
         self._executor = None
+        self._columns: list[str] | None = None
 
     @property
     def executor(self):
@@ -175,6 +176,24 @@ class DatasetService:
             path = self._settings.csv_source.resolve_path()
             self._executor = CsvSQLExecutor(csv_path=path, table_name=self.table_name)
         return self._executor
+
+    def list_columns(self) -> list[str]:
+        if self._columns is None:
+            executor = self.executor
+            columns = getattr(executor, "columns", None)
+            self._columns = list(columns) if columns else []
+        return list(self._columns)
+
+    def row_count(self) -> int:
+        data = getattr(self.executor, "_rows", None)
+        return len(data) if data is not None else 0
+
+    def fetch_rows(self, *, offset: int, limit: int) -> list[dict[str, Any]]:
+        data = getattr(self.executor, "_rows", None)
+        if data is None:
+            return []
+        slice_rows = data[offset : offset + limit]
+        return [dict(row) for row in slice_rows]
 
     def fetch_record(
         self,
@@ -229,6 +248,23 @@ class TicketResultResponse(BaseModel):
     ticket_id: str
     result: dict[str, Any]
     timeline: list[TimelineEntry]
+
+
+class DatasetColumnsResponse(BaseModel):
+    columns: list[str]
+    primary_key: str
+    table_name: str
+
+
+class DatasetRowsResponse(BaseModel):
+    columns: list[str]
+    rows: list[dict[str, Any]]
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
+    primary_key: str
+    table_name: str
 
 
 @dataclass(slots=True)
@@ -356,6 +392,36 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
     @app.get("/api/health")
     def healthcheck() -> dict[str, str]:  # pragma: no cover - trivial
         return {"status": "ok"}
+
+    @app.get("/api/dataset/columns", response_model=DatasetColumnsResponse)
+    def dataset_columns() -> DatasetColumnsResponse:
+        return DatasetColumnsResponse(
+            columns=dataset_service.list_columns(),
+            primary_key=dataset_service.default_primary_key,
+            table_name=dataset_service.table_name,
+        )
+
+    @app.get("/api/dataset/rows", response_model=DatasetRowsResponse)
+    def dataset_rows(
+        offset: int = Query(0, ge=0),
+        limit: int = Query(25, ge=1, le=100),
+    ) -> DatasetRowsResponse:
+        total = dataset_service.row_count()
+        if offset >= total:
+            rows: list[dict[str, Any]] = []
+        else:
+            rows = dataset_service.fetch_rows(offset=offset, limit=limit)
+        has_more = offset + len(rows) < total
+        return DatasetRowsResponse(
+            columns=dataset_service.list_columns(),
+            rows=rows,
+            total=total,
+            offset=offset,
+            limit=limit,
+            has_more=has_more,
+            primary_key=dataset_service.default_primary_key,
+            table_name=dataset_service.table_name,
+        )
 
     @app.post("/api/session", response_model=SessionStartResponse)
     def start_session(payload: SessionStartRequest) -> SessionStartResponse:

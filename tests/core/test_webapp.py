@@ -78,6 +78,35 @@ def test_start_session_returns_context(monkeypatch: pytest.MonkeyPatch, tmp_path
         assert payload["session_id"]
 
 
+def test_dataset_columns_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_dataset: Path) -> None:
+    config_path = _write_config(tmp_path)
+    monkeypatch.setenv("CSV_DATA_PATH", str(sample_dataset))
+
+    app = create_app(config_path=str(config_path))
+    with TestClient(app) as client:
+        response = client.get("/api/dataset/columns")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["columns"][0] == "BRIZO_ID"
+        assert payload["primary_key"] == "BRIZO_ID"
+        assert payload["table_name"] == "dataset"
+
+
+def test_dataset_rows_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_dataset: Path) -> None:
+    config_path = _write_config(tmp_path)
+    monkeypatch.setenv("CSV_DATA_PATH", str(sample_dataset))
+
+    app = create_app(config_path=str(config_path))
+    with TestClient(app) as client:
+        response = client.get("/api/dataset/rows", params={"limit": 10, "offset": 0})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 1
+        assert payload["rows"][0]["BRIZO_ID"] == "row-1"
+        assert payload["has_more"] is False
+        assert payload["primary_key"] == "BRIZO_ID"
+
+
 def test_ask_question_returns_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_dataset: Path) -> None:
     config_path = _write_config(tmp_path)
     monkeypatch.setenv("CSV_DATA_PATH", str(sample_dataset))

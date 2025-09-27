@@ -9,56 +9,103 @@
   <body>
     <header class="app-header">
       <h1>Self-Enriching BI Assistant</h1>
-      <p>Ask questions about a CRM record and watch the agents collaborate.</p>
+      <p>Browse your dataset, pick a record, and watch the agents collaborate in real time.</p>
     </header>
     <main class="layout">
-      <section class="panel">
-        <h2>Session</h2>
-        <form id="session-form" class="form">
-          <label for="record-id">Record ID</label>
-          <input id="record-id" name="recordId" placeholder="Enter record id" required />
-          <div class="form-actions">
-            <button type="submit">Start Session</button>
-            <button type="button" id="resume-session" class="secondary">Resume</button>
+      <nav class="tabs" role="tablist">
+        <button class="tab-button active" data-tab="dataset" id="tab-btn-dataset" role="tab" aria-selected="true">
+          Dataset
+        </button>
+        <button class="tab-button" data-tab="chat" id="tab-btn-chat" role="tab" aria-selected="false" disabled>
+          Conversation
+        </button>
+      </nav>
+
+      <section class="panel tab-panel active" id="tab-dataset" role="tabpanel" aria-labelledby="tab-btn-dataset">
+        <header class="panel-header">
+          <div>
+            <h2>Dataset Navigator</h2>
+            <p>Select a row to launch an agent session.</p>
           </div>
-        </form>
-        <div class="session-details" id="session-details" hidden>
-          <dl>
-            <div>
-              <dt>Session</dt>
-              <dd id="session-id">—</dd>
-            </div>
-            <div>
-              <dt>Record</dt>
-              <dd id="session-record">—</dd>
-            </div>
-          </dl>
-          <div class="candidate-urls">
-            <h3>Candidate URLs</h3>
-            <ul id="candidate-urls"></ul>
+          <div class="dataset-status">
+            <span id="dataset-count">0 rows</span>
+          </div>
+        </header>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr id="dataset-table-head"></tr>
+            </thead>
+            <tbody id="dataset-table-body"></tbody>
+          </table>
+        </div>
+
+        <div class="navigator-actions">
+          <div class="pagination">
+            <button type="button" id="dataset-prev" class="secondary">Previous</button>
+            <span id="dataset-range">Rows 0-0</span>
+            <button type="button" id="dataset-next" class="secondary">Next</button>
+          </div>
+          <div class="selection">
+            <span id="dataset-selection-label" class="selection-label">No row selected.</span>
+            <button type="button" id="dataset-confirm" class="primary" disabled>Open Record</button>
           </div>
         </div>
       </section>
-      <section class="panel">
-        <h2>Record Context</h2>
-        <div id="record-context" class="key-value"></div>
-      </section>
-      <section class="panel chat-panel">
-        <h2>Conversation</h2>
-        <div id="conversation" class="conversation"></div>
-        <form id="question-form" class="form" hidden>
-          <label for="question-input">Ask a question</label>
-          <textarea
-            id="question-input"
-            name="question"
-            placeholder="e.g. How many employees?"
-            rows="3"
-            required
-          ></textarea>
-          <div class="form-actions">
-            <button type="submit">Send</button>
-          </div>
-        </form>
+
+      <section class="panel tab-panel" id="tab-chat" role="tabpanel" aria-labelledby="tab-btn-chat" hidden>
+        <div class="chat-layout">
+          <section class="context-panel">
+            <header class="panel-header">
+              <div>
+                <h2>Record Context</h2>
+                <p>Overview of the active record.</p>
+              </div>
+              <button type="button" id="resume-session" class="secondary small">Resume session</button>
+            </header>
+            <div class="session-details" id="session-details" hidden>
+              <dl class="session-meta">
+                <div>
+                  <dt>Session</dt>
+                  <dd id="session-id">—</dd>
+                </div>
+                <div>
+                  <dt>Record</dt>
+                  <dd id="session-record">—</dd>
+                </div>
+              </dl>
+              <div id="record-context" class="key-value"></div>
+              <div class="candidate-urls">
+                <h3>Candidate URLs</h3>
+                <ul id="candidate-urls"></ul>
+              </div>
+            </div>
+          </section>
+
+          <section class="conversation-panel">
+            <header class="panel-header">
+              <div>
+                <h2>Conversation</h2>
+                <p>Ask questions and follow the agent workflow.</p>
+              </div>
+            </header>
+            <div id="conversation" class="conversation"></div>
+            <form id="question-form" class="form" hidden>
+              <label for="question-input">Ask a question</label>
+              <textarea
+                id="question-input"
+                name="question"
+                placeholder="e.g. How many employees?"
+                rows="3"
+                required
+              ></textarea>
+              <div class="form-actions">
+                <button type="submit">Send</button>
+              </div>
+            </form>
+          </section>
+        </div>
       </section>
     </main>
     <template id="timeline-item-template">

@@ -66,7 +66,8 @@ flowchart TD
 
 ## Web Frontend
 - Serve the browser experience with `python -m src.core.webapp --config configs/dev.yaml --host 0.0.0.0 --port 8000`. The FastAPI app mounts static assets from `assets/frontend/` and exposes REST endpoints under `/api/*`.
-- Start or resume a session by POSTing to `/api/session`; each response includes the record snapshot, distilled business context, and candidate URLs detected in the CSV row.
+- Start on the **Dataset** tab to browse CSV metadata via `/api/dataset/columns` and `/api/dataset/rows`. Use the inline navigator to page through rows, inspect values, and select the primary key without typing IDs manually.
+- Once a row is selected the app calls `/api/session` for you; the **Conversation** tab shows the record context, candidate URLs, and live agent narration streamed via Server-Sent Events on `/api/tickets/{ticket_id}/events`.
 - Submit questions with `/api/session/{session_id}/ask` to trigger the full agent workflow. Requests return immediately with a ticket id; the browser (or any client) can stream live narration over Server-Sent Events via `GET /api/tickets/{ticket_id}/events` while the background task runs.
 - Fetch the consolidated outcome—including answers and any schema proposals—once processing completes with `GET /api/tickets/{ticket_id}`. Each SSE `result` event mirrors the same payload so chat transcripts stay in sync.
 - The `assets/frontend/index.html` page uses a lightweight vanilla JS client (`app.js`) to render record context, conversation turns, and timeline updates. No build tooling is required—FastAPI serves the files directly.
