@@ -344,28 +344,28 @@ function createAgentCard(ticketId) {
   meta.className = "meta";
   meta.textContent = `${ticketId} · status: processing`;
 
-  const body = document.createElement("div");
-  body.className = "body processing";
-  const spinnerWrap = document.createElement("div");
-  spinnerWrap.className = "spinner";
-  body.appendChild(spinnerWrap);
-  const placeholder = document.createElement("p");
-  placeholder.className = "processing-text";
-  placeholder.textContent = "Working on it...";
-  body.appendChild(placeholder);
-
   const timeline = document.createElement("div");
   timeline.className = "timeline";
   timeline.hidden = true;
 
+  const summary = document.createElement("div");
+  summary.className = "result-summary processing";
+  const spinnerWrap = document.createElement("div");
+  spinnerWrap.className = "spinner";
+  summary.appendChild(spinnerWrap);
+  const placeholder = document.createElement("p");
+  placeholder.className = "processing-text";
+  placeholder.textContent = "Working on it...";
+  summary.appendChild(placeholder);
+
   card.appendChild(meta);
-  card.appendChild(body);
   card.appendChild(timeline);
+  card.appendChild(summary);
 
   conversationElement.appendChild(card);
   conversationElement.scrollTop = conversationElement.scrollHeight;
 
-  return { card, meta, body, timeline };
+  return { card, meta, summary, timeline };
 }
 
 function subscribeToTicket(ticketId, refs) {
@@ -420,14 +420,19 @@ function applyResult(ticketId, refs, result) {
   } else {
     refs.meta.textContent = `${ticketId} · status: complete`;
   }
-  refs.body.classList.remove("processing");
-  refs.body.innerHTML = "";
-  refs.body.appendChild(renderResult(result || {}));
+  refs.summary.classList.remove("processing");
+  refs.summary.innerHTML = "";
+  refs.summary.appendChild(renderResult(result || {}));
   conversationElement.scrollTop = conversationElement.scrollHeight;
 }
 
 function renderResult(result) {
   const container = document.createElement("div");
+
+  const heading = document.createElement("h3");
+  heading.textContent = "Agent Summary";
+  heading.style.margin = "0";
+  container.appendChild(heading);
 
   if (result.answers) {
     const list = document.createElement("ul");

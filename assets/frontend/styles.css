@@ -296,10 +296,6 @@ button.secondary:hover:not(:disabled) {
   justify-content: flex-end;
 }
 
-.conversation-panel .form {
-  margin-top: auto;
-}
-
 .chat-layout {
   display: flex;
   gap: 1.5rem;
@@ -325,6 +321,26 @@ button.secondary:hover:not(:disabled) {
   flex-direction: column;
 }
 
+.result-summary {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.result-summary.processing {
+  align-items: center;
+}
+
+.result-summary h3 {
+  font-size: 1rem;
+  color: #0f172a;
+}
+
 .conversation {
   display: flex;
   flex-direction: column;
@@ -333,6 +349,10 @@ button.secondary:hover:not(:disabled) {
   max-height: 380px;
   overflow-y: auto;
   padding-right: 0.5rem;
+}
+
+.conversation-panel .form {
+  margin-top: 1rem;
 }
 
 .message {
@@ -346,14 +366,6 @@ button.secondary:hover:not(:disabled) {
   align-self: flex-end;
   background: #2563eb;
   color: white;
-}
-
-.message.agent .body.processing {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-  color: #475569;
 }
 
 .spinner {
