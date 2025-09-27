@@ -56,84 +56,14 @@ class Runner:
 
         if self.dependencies is None:
             raise ValueError("Runner dependencies must be provided")
-        if self.dependencies.sql_executor is None:
-            raise ValueError("SQL executor dependency is required")
-        if self.dependencies.missing_data_flagger is None:
-            raise ValueError("Missing data flagger dependency is required")
-        if self.dependencies.scraper_agent is None:
-            raise ValueError("Scraper agent dependency is required")
-        if self.dependencies.update_agent is None:
-            raise ValueError("Update agent dependency is required")
-        if self.dependencies.schema_agent is None:
-            raise ValueError("Schema agent dependency is required")
+        _validate_dependencies(self.dependencies)
 
         scenarios = self.scenario_loader.load(profile)
         return [self._run_scenario(scenario) for scenario in scenarios]
 
     def _run_scenario(self, scenario: dict[str, Any]) -> dict[str, Any]:
         assert self.dependencies is not None  # for mypy; guarded in execute
-        ticket_id = str(scenario.get("ticket_id"))
-        question = str(scenario.get("question"))
-        record_id = str(scenario.get("record_id"))
-        primary_key = str(scenario.get("primary_key_column", "BRIZO_ID"))
-        table_name = str(scenario.get("table_name", "dataset"))
-
-        agent = QueryAgent(
-            sql_executor=self.dependencies.sql_executor,
-            missing_data_flagger=self.dependencies.missing_data_flagger,
-            primary_key_column=primary_key,
-            table_name=table_name,
-            logger=self.dependencies.query_logger,
-        )
-
-        result = agent.answer_question(
-            ticket_id=ticket_id,
-            question=question,
-            record_id=record_id,
-        )
-
-        if result.get("status") != "answered":
-            self._augment_with_scraper(ticket_id, question, result)
-
-        enrichment_payload = self._resolve_enrichment_payload(result, scenario)
-        schema_proposal: dict[str, Any] | None = None
-
-        if enrichment_payload:
-            update_summary = self.dependencies.update_agent.apply_enrichment(
-                ticket_id=ticket_id,
-                record_id=record_id,
-                enriched_fields=enrichment_payload,
-            )
-            result["update"] = update_summary
-
-            escalated = (
-                update_summary.get("escalated") if isinstance(update_summary, dict) else None
-            )
-            if escalated:
-                schema_proposal = self.dependencies.schema_agent.propose_change(
-                    ticket_id=ticket_id,
-                    evidence_summary=escalated,
-                )
-
-        if schema_proposal:
-            result["schema_proposal"] = schema_proposal
-
-        return result
-
-    def _augment_with_scraper(self, ticket_id: str, question: str, result: dict[str, Any]) -> None:
-        assert self.dependencies is not None and self.dependencies.scraper_agent is not None
-        missing_facts: dict[str, Any] = {"status": result.get("status")}
-        if "missing_columns" in result:
-            missing_facts["missing_columns"] = result["missing_columns"]
-        outcome = self.dependencies.scraper_agent.execute_plan(
-            ticket_id=ticket_id,
-            question=question,
-            missing_facts=missing_facts,
-        )
-        if outcome.tasks:
-            result["scraper_tasks"] = [task.to_dict() for task in outcome.tasks]
-        if outcome.findings:
-            result["scraper_findings"] = len(outcome.findings)
+        return run_scenario(self.dependencies, scenario)
 
     @staticmethod
     def _resolve_enrichment_payload(
@@ -173,3 +103,86 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> dict[str, Any]:
+    """Execute a single scenario using the provided *dependencies*."""
+
+    _validate_dependencies(dependencies)
+
+    ticket_id = str(scenario.get("ticket_id"))
+    question = str(scenario.get("question"))
+    record_id = str(scenario.get("record_id"))
+    primary_key = str(scenario.get("primary_key_column", "BRIZO_ID"))
+    table_name = str(scenario.get("table_name", "dataset"))
+
+    agent = QueryAgent(
+        sql_executor=dependencies.sql_executor,
+        missing_data_flagger=dependencies.missing_data_flagger,
+        primary_key_column=primary_key,
+        table_name=table_name,
+        logger=dependencies.query_logger,
+    )
+
+    result = agent.answer_question(
+        ticket_id=ticket_id,
+        question=question,
+        record_id=record_id,
+    )
+
+    if result.get("status") != "answered":
+        _augment_with_scraper(dependencies, ticket_id, question, result)
+
+    enrichment_payload = Runner._resolve_enrichment_payload(result, scenario)
+    schema_proposal: dict[str, Any] | None = None
+
+    if enrichment_payload:
+        update_summary = dependencies.update_agent.apply_enrichment(
+            ticket_id=ticket_id,
+            record_id=record_id,
+            enriched_fields=enrichment_payload,
+        )
+        result["update"] = update_summary
+
+        escalated = update_summary.get("escalated") if isinstance(update_summary, dict) else None
+        if escalated:
+            schema_proposal = dependencies.schema_agent.propose_change(
+                ticket_id=ticket_id,
+                evidence_summary=escalated,
+            )
+
+    if schema_proposal:
+        result["schema_proposal"] = schema_proposal
+
+    return result
+
+
+def _augment_with_scraper(
+    dependencies: RunnerDependencies, ticket_id: str, question: str, result: dict[str, Any]
+) -> None:
+    assert dependencies.scraper_agent is not None
+    missing_facts: dict[str, Any] = {"status": result.get("status")}
+    if "missing_columns" in result:
+        missing_facts["missing_columns"] = result["missing_columns"]
+    outcome = dependencies.scraper_agent.execute_plan(
+        ticket_id=ticket_id,
+        question=question,
+        missing_facts=missing_facts,
+    )
+    if outcome.tasks:
+        result["scraper_tasks"] = [task.to_dict() for task in outcome.tasks]
+    if outcome.findings:
+        result["scraper_findings"] = len(outcome.findings)
+
+
+def _validate_dependencies(dependencies: RunnerDependencies) -> None:
+    if dependencies.sql_executor is None:
+        raise ValueError("SQL executor dependency is required")
+    if dependencies.missing_data_flagger is None:
+        raise ValueError("Missing data flagger dependency is required")
+    if dependencies.scraper_agent is None:
+        raise ValueError("Scraper agent dependency is required")
+    if dependencies.update_agent is None:
+        raise ValueError("Update agent dependency is required")
+    if dependencies.schema_agent is None:
+        raise ValueError("Schema agent dependency is required")
