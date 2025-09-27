@@ -7,6 +7,8 @@ paths:
   scrapes_dir: assets/scrapes
   schema_escalations_dir: schema/escalations
   migrations_dir: schema/migrations
+  query_logs_dir: logs/query
+  scraper_logs_dir: logs/scraper
 search:
   provider: openai
   model_id: gpt-4.1-mini

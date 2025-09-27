@@ -18,5 +18,5 @@
 - Return structured task lists and summary statistics to the runner for traceability.
 
 ## Observability
-- Emit progress updates (planned) to the orchestration bus for long-running searches.
+- Emit JSONL progress events (`scrape_plan_created`, `scrape_task_started`, etc.) to `logs/scraper/<ticket>.jsonl`.
 - Track external API usage to enforce rate limits and cost controls. Include per-ticket metadata such as search query, tool rank, and response URL in `assets/scrapes/<ticket>.jsonl` for auditability.

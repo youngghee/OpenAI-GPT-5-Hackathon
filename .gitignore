@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 sql_*.csv
 *.egg-info/
+logs/

@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from src.core.observability import QueryObservationSink
+
 TOKEN_MIN_LENGTH = 3
 
 DEFAULT_SYNONYMS: dict[str, set[str]] = {
@@ -51,31 +53,55 @@ class QueryAgent:
     primary_key_column: str = "BRIZO_ID"
     table_name: str = "dataset"
     max_columns: int = 3
+    logger: QueryObservationSink | None = None
 
     def answer_question(self, *, ticket_id: str, question: str, record_id: str) -> dict[str, Any]:
         """Return a structured answer for the provided question."""
 
-        row = self._fetch_record(record_id)
+        self._log_event(
+            ticket_id,
+            "question_received",
+            {"record_id": record_id, "question": question},
+        )
+
+        row = self._fetch_record(ticket_id, record_id)
         if row is None:
             self._flag_missing(
                 ticket_id, question, {"reason": "record_not_found", "record_id": record_id}
             )
-            return {
+            result = {
                 "ticket_id": ticket_id,
                 "record_id": record_id,
                 "question": question,
                 "status": "record_not_found",
             }
+            self._log_event(
+                ticket_id,
+                "question_resolved",
+                {"record_id": record_id, "status": result["status"]},
+            )
+            return result
 
         columns = self._infer_columns(question, row)
+        self._log_event(
+            ticket_id,
+            "columns_inferred",
+            {"record_id": record_id, "columns": columns},
+        )
         if not columns:
             self._flag_missing(ticket_id, question, {"reason": "unknown_question"})
-            return {
+            result = {
                 "ticket_id": ticket_id,
                 "record_id": record_id,
                 "question": question,
                 "status": "unknown_question",
             }
+            self._log_event(
+                ticket_id,
+                "question_resolved",
+                {"record_id": record_id, "status": result["status"]},
+            )
+            return result
 
         answers = {column: row[column] for column in columns if self._has_value(row.get(column))}
         if not answers:
@@ -84,26 +110,54 @@ class QueryAgent:
                 question,
                 {"reason": "missing_values", "missing_columns": columns},
             )
-            return {
+            result = {
                 "ticket_id": ticket_id,
                 "record_id": record_id,
                 "question": question,
                 "status": "missing_values",
                 "missing_columns": columns,
             }
+            self._log_event(
+                ticket_id,
+                "question_resolved",
+                {"record_id": record_id, "status": result["status"]},
+            )
+            return result
 
-        return {
+        self._log_event(
+            ticket_id,
+            "answer_ready",
+            {"record_id": record_id, "columns": list(answers.keys())},
+        )
+        result = {
             "ticket_id": ticket_id,
             "record_id": record_id,
             "question": question,
             "status": "answered",
             "answers": answers,
         }
+        self._log_event(
+            ticket_id,
+            "question_resolved",
+            {"record_id": record_id, "status": result["status"]},
+        )
+        return result
 
-    def _fetch_record(self, record_id: str) -> dict[str, Any] | None:
+    def _fetch_record(self, ticket_id: str, record_id: str) -> dict[str, Any] | None:
         statement = self._build_select_statement(record_id)
+        self._log_event(
+            ticket_id,
+            "sql_executed",
+            {"record_id": record_id, "statement": statement},
+        )
         rows = self.sql_executor.run(statement)
-        return rows[0] if rows else None
+        found = rows[0] if rows else None
+        self._log_event(
+            ticket_id,
+            "record_fetch_result",
+            {"record_id": record_id, "found": bool(found)},
+        )
+        return found
 
     def _build_select_statement(self, record_id: str) -> str:
         safe_id = record_id.replace("'", "''")
@@ -170,4 +224,18 @@ class QueryAgent:
         return re.sub(r"\s+", " ", cleaned).strip()
 
     def _flag_missing(self, ticket_id: str, question: str, facts: dict[str, Any]) -> None:
+        self._log_event(
+            ticket_id,
+            "missing_data_flagged",
+            {"question": question, "facts": facts},
+        )
         self.missing_data_flagger.flag_missing(ticket_id=ticket_id, question=question, facts=facts)
+
+    def _log_event(self, ticket_id: str, event: str, payload: dict[str, Any]) -> None:
+        if self.logger is None:
+            return
+        try:
+            self.logger.log_event(ticket_id, event, payload)
+        except Exception:
+            # Observability failures must not impact question handling.
+            pass
