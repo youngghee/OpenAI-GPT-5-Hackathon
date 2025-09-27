@@ -75,10 +75,11 @@ def test_plan_research_for_missing_columns() -> None:
         missing_facts={"missing_columns": ["BUSINESS_NAME", "LOCATION_CITY"]},
     )
 
-    expected_task_count = 2
-    assert len(tasks) == expected_task_count
-    assert tasks[0].topic == "BUSINESS_NAME"
-    assert "business name" in tasks[0].query.lower()
+    assert len(tasks) == 3
+    assert tasks[0].topic == "google"
+    column_topics = {task.topic for task in tasks[1:]}
+    assert "BUSINESS_NAME" in column_topics
+    assert any("business name" in task.query.lower() for task in tasks)
 
 
 def test_execute_plan_persists_findings(tmp_path: Path) -> None:
@@ -144,5 +145,28 @@ def test_llm_plan_creates_tasks() -> None:
         ticket_id="T-LLM",
     )
 
-    assert tasks and tasks[0].topic == "BUSINESS_NAME"
+    assert tasks and tasks[0].topic == "google"
     assert llm.calls
+
+
+def test_candidate_urls_influence_tasks() -> None:
+    agent = ScraperAgent(
+        search_client=_SearchClientStub(responses={}),
+        evidence_sink=_SinkStub(),
+    )
+
+    tasks = agent.plan_research(
+        question="Check delivery options",
+        missing_facts={
+            "candidate_urls": [
+                "https://www.pigglywiggly.com/menu",
+                "https://facebook.com/piggly",
+                "https://internal.example.com/notes",
+            ]
+        },
+    )
+
+    topics = {task.topic for task in tasks}
+    assert "google" in topics
+    assert any("pigglywiggly.com" in topic for topic in topics)
+    assert any("facebook.com" in topic for topic in topics)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from src.core.observability import ScraperObservationSink
 from src.integrations.openai_agent_sdk import OpenAIAgentAdapter
@@ -64,51 +65,61 @@ class ScraperAgent:
     llm_client: OpenAIAgentAdapter | None = None
 
     def plan_research(
-        self, question: str, missing_facts: dict[str, Any], *, ticket_id: str | None = None
+        self,
+        question: str,
+        missing_facts: dict[str, Any],
+        *,
+        ticket_id: str | None = None,
     ) -> list[SearchTask]:
         """Return search directives for subagents based on identified gaps."""
 
         missing_columns = missing_facts.get("missing_columns", []) if missing_facts else []
+        candidate_urls = (
+            missing_facts.get("candidate_urls") if isinstance(missing_facts, dict) else None
+        )
+
+        tasks: list[SearchTask] = []
+        if question:
+            tasks.append(
+                SearchTask(
+                    query=f'"{question}"',
+                    topic="google",
+                    description="General Google search for the question",
+                )
+            )
+
+        tasks.extend(self._candidate_url_tasks(question, candidate_urls))
 
         if self.llm_client:
-            tasks = self._plan_with_llm(
+            llm_tasks = self._plan_with_llm(
                 question=question,
                 missing_columns=missing_columns,
                 ticket_id=ticket_id,
             )
-            if tasks:
-                return tasks
+            if llm_tasks:
+                tasks.extend(llm_tasks)
 
-        if not missing_columns:
-            tasks = [
+        if missing_columns:
+            for column in missing_columns:
+                readable = column.replace("_", " ").strip().lower()
+                query = f"{question} {readable}" if readable else question
+                tasks.append(
+                    SearchTask(
+                        query=query,
+                        topic=column,
+                        description=f"Find supporting evidence for missing column '{column}'",
+                    )
+                )
+        elif not candidate_urls:
+            # If we have no specific missing columns or URLs, add a general follow-up search.
+            tasks.append(
                 SearchTask(
-                    query=question,
+                    query=question or "company background",
                     topic="general",
                     description="General context gathering for unanswered question",
                 )
-            ]
-            self._log_event(
-                ticket_id=ticket_id,
-                event="scrape_plan_created",
-                payload={
-                    "question": question,
-                    "task_count": len(tasks),
-                    "missing_columns": missing_columns,
-                },
             )
-            return tasks
 
-        tasks: list[SearchTask] = []
-        for column in missing_columns:
-            readable = column.replace("_", " ").strip().lower()
-            query = f"{question} {readable}" if readable else question
-            tasks.append(
-                SearchTask(
-                    query=query,
-                    topic=column,
-                    description=f"Find supporting evidence for missing column '{column}'",
-                )
-            )
         self._log_event(
             ticket_id=ticket_id,
             event="scrape_plan_created",
@@ -230,6 +241,44 @@ class ScraperAgent:
                 {"task_count": len(tasks)},
             )
         return tasks
+
+    def _candidate_url_tasks(
+        self, question: str, candidate_urls: Iterable[str] | None
+    ) -> list[SearchTask]:
+        if not candidate_urls:
+            return []
+        tasks: list[SearchTask] = []
+        seen_hosts: set[str] = set()
+        for url in candidate_urls:
+            host = self._extract_host(url)
+            if not host or any(keyword in host for keyword in self.IGNORED_HOST_KEYWORDS):
+                continue
+            if host in seen_hosts:
+                continue
+            seen_hosts.add(host)
+            tasks.append(
+                SearchTask(
+                    query=f"site:{host} {question}",
+                    topic=host,
+                    description=f"Search {host} for information related to the question",
+                )
+            )
+        return tasks
+
+    @staticmethod
+    def _extract_host(url: str) -> str | None:
+        parsed = urlparse(url.strip())
+        host = parsed.netloc or parsed.path.split("/")[0]
+        return host.lower() if host else None
+
+    IGNORED_HOST_KEYWORDS = {
+        "foodmetrics",
+        "internal",
+        "example.com",
+        "google.com",
+        "g.page",
+        "goo.gl",
+    }
 
     @staticmethod
     def _parse_llm_plan(response: Any) -> list[SearchTask]:  # pragma: no cover - exercised via tests

@@ -43,6 +43,7 @@ def test_build_dependencies_uses_in_memory_when_no_csv(base_settings: Settings) 
     assert deps.query_logger is not None
     assert deps.scraper_logger is not None
     assert deps.gpt_client is None
+    assert deps.candidate_url_fields == []
 
 
 def test_build_dependencies_uses_csv_path(
@@ -64,6 +65,7 @@ def test_build_dependencies_uses_csv_path(
     assert deps.query_logger is not None
     assert deps.scraper_logger is not None
     assert deps.gpt_client is None
+    assert deps.candidate_url_fields == []
 
 
 def test_build_dependencies_uses_openai_search(
@@ -104,3 +106,20 @@ def test_build_dependencies_uses_openai_search(
     expected_max_results = 5
     assert isinstance(deps.scraper_agent.search_client, _SearchStub)
     assert created_clients and created_clients[0].kwargs["max_results"] == expected_max_results
+    assert deps.candidate_url_fields == []
+
+
+def test_candidate_url_fields_detected(
+    tmp_path: Path, base_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_file = tmp_path / "records.csv"
+    csv_file.write_text(
+        "BRIZO_ID,LINK,YELP_LINK,NOTES\nrow-1,https://example.com,https://yelp.com/biz/example,info\n",
+        encoding="utf-8",
+    )
+    base_settings.csv_source = CSVSourceSettings(path_env="CSV_DATA_PATH", table_name="records")
+    monkeypatch.setenv("CSV_DATA_PATH", str(csv_file))
+
+    deps = build_dependencies(base_settings)
+
+    assert set(deps.candidate_url_fields or []) == {"LINK", "YELP_LINK"}

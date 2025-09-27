@@ -57,6 +57,7 @@ class QueryAgent:
     table_name: str = "dataset"
     max_columns: int = 3
     logger: QueryObservationSink | None = None
+    candidate_url_fields: list[str] | None = None
 
     def answer_question(self, *, ticket_id: str, question: str, record_id: str) -> dict[str, Any]:
         """Return a structured answer for the provided question."""
@@ -68,6 +69,7 @@ class QueryAgent:
         )
 
         row = self._fetch_record(ticket_id, record_id)
+        candidate_urls = self._extract_candidate_urls(row) if row else []
         if row is None:
             self._flag_missing(
                 ticket_id, question, {"reason": "record_not_found", "record_id": record_id}
@@ -77,6 +79,7 @@ class QueryAgent:
                 "record_id": record_id,
                 "question": question,
                 "status": "record_not_found",
+                "candidate_urls": candidate_urls,
             }
             self._log_event(
                 ticket_id,
@@ -98,6 +101,7 @@ class QueryAgent:
                 "record_id": record_id,
                 "question": question,
                 "status": "unknown_question",
+                "candidate_urls": candidate_urls,
             }
             self._log_event(
                 ticket_id,
@@ -119,6 +123,7 @@ class QueryAgent:
                 "question": question,
                 "status": "missing_values",
                 "missing_columns": columns,
+                "candidate_urls": candidate_urls,
             }
             self._log_event(
                 ticket_id,
@@ -138,6 +143,7 @@ class QueryAgent:
             "question": question,
             "status": "answered",
             "answers": answers,
+            "candidate_urls": candidate_urls,
         }
         self._log_event(
             ticket_id,
@@ -334,3 +340,57 @@ class QueryAgent:
         except Exception:
             # Observability failures must not impact question handling.
             pass
+
+    def _extract_candidate_urls(self, row: dict[str, Any] | None) -> list[str]:
+        if not row:
+            return []
+        urls: list[str] = []
+        seen: set[str] = set()
+        columns = self.candidate_url_fields if self.candidate_url_fields else list(row.keys())
+        for column in columns:
+            value = row.get(column)
+            if not value:
+                continue
+            normalized = self._normalize_url(str(value))
+            if not normalized or normalized in seen:
+                continue
+            urls.append(normalized)
+            seen.add(normalized)
+        return urls
+
+    @staticmethod
+    def _looks_like_url(value: str) -> bool:
+        text = value.strip()
+        if not text:
+            return False
+        lowered = text.lower()
+        if lowered.startswith("http://") or lowered.startswith("https://"):
+            return True
+        if lowered.startswith("www."):
+            return True
+        if " " in lowered:
+            return False
+        if "." not in lowered:
+            return False
+        host_candidate = lowered.split("/")[0]
+        if (
+            host_candidate.count(".") >= 1
+            and not host_candidate.endswith(".")
+            and any(ch.isalpha() for ch in host_candidate)
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _normalize_url(value: str) -> str | None:
+        text = value.strip()
+        if not QueryAgent._looks_like_url(text):
+            return None
+        lowered = text.lower()
+        if lowered.startswith("http://") or lowered.startswith("https://"):
+            base = text
+        elif lowered.startswith("www."):
+            base = f"https://{text}"
+        else:
+            base = f"https://{text}"
+        return base.rstrip("/")

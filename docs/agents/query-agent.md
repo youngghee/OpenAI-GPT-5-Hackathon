@@ -11,6 +11,7 @@
 
 ## Responsibilities
 - Answer stakeholder questions using the CSV-backed dataset and lightweight analytics (queries executed via `CsvSQLExecutor`). When direct column matches are absent, the agent consults the GPT-5 Responses model via the OpenAI Agents SDK (configurable via `response_model_id`, with automatic Responses API fallback) to synthesize a JSON object of column/value pairs constrained to the provided row context.
+- Surface canonical website fields (`LINK`, `GOOGLEMAPS_LINK`, `YELP_LINK`, `FACEBOOK_LINK`, delivery-platform links, etc.) as `candidate_urls` so the scraper can prioritise site-specific searches.
 - Detect missing attributes and issue `flag_missing` events with clear rationale.
 - Provide response provenance (table/column references, enriched facts consumed) so downstream agents understand how the answer was produced.
 
