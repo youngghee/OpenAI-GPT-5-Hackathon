@@ -1,0 +1,18 @@
+model_id: gpt-5-enterprise
+codex_id: gpt-5-codex-pro
+scraper:
+  rate_limit_per_min: 30
+  default_timeout_s: 15
+agents:
+  query:
+    token_budget: 8000
+    safety_notes: []
+  scraper:
+    token_budget: 6000
+    safety_notes: []
+  update:
+    token_budget: 2000
+    safety_notes: []
+  schema:
+    token_budget: 4000
+    safety_notes: []
