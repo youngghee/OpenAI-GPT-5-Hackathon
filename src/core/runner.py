@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from src.core.dependencies import RunnerDependencies
+
 
 class ScenarioLoader(Protocol):
     """Provides iterative scenarios for the orchestrator to execute."""
@@ -18,6 +20,7 @@ class Runner:
     """Coordinates the end-to-end agent workflow for a simulation run."""
 
     scenario_loader: ScenarioLoader
+    dependencies: RunnerDependencies | None = None
 
     def execute(self, profile: str) -> None:
         """Run all scenarios defined for the supplied profile."""

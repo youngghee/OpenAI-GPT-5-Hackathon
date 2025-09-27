@@ -3,6 +3,10 @@ codex_id: gpt-5-codex-pro
 scraper:
   rate_limit_per_min: 30
   default_timeout_s: 15
+data_sources:
+  csv:
+    path_env: CSV_DATA_PATH
+    table_name: dataset
 agents:
   query:
     token_budget: 8000

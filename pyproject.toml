@@ -1,0 +1,38 @@
+[project]
+name = "self-enriching-bi"
+version = "0.1.0"
+description = "Multi-agent business intelligence prototype"
+readme = "AGENTS.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.8",
+    "ruff>=0.6.0",
+    "pytest>=8.3",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 100
+include = "\\.(py|pyi)$"
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "TID", "PL"]
+ignore = ["E501"]
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+profile = "black"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
