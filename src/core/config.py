@@ -32,6 +32,11 @@ class CSVSourceSettings:
 
 
 @dataclass(slots=True)
+class PathsSettings:
+    scrapes_dir: str | None = None
+
+
+@dataclass(slots=True)
 class AgentSettings:
     token_budget: int
     safety_notes: list[str]
@@ -43,6 +48,7 @@ class Settings:
     codex_id: str
     scraper: ScraperSettings
     csv_source: CSVSourceSettings | None
+    paths: PathsSettings | None
     agents: dict[str, AgentSettings]
 
 
@@ -72,6 +78,12 @@ def load_settings(path: str | Path) -> Settings:
             table_name=str(csv_source_raw.get("table_name", "dataset")),
         )
 
+    paths_raw: dict[str, Any] | None = raw.get("paths")
+    paths = None
+    if paths_raw:
+        scrapes_dir = paths_raw.get("scrapes_dir")
+        paths = PathsSettings(scrapes_dir=str(scrapes_dir) if scrapes_dir else None)
+
     agents_raw = raw.get("agents", {})
     agents: dict[str, AgentSettings] = {}
     for name, values in agents_raw.items():
@@ -85,5 +97,6 @@ def load_settings(path: str | Path) -> Settings:
         codex_id=str(raw.get("codex_id", "")),
         scraper=scraper,
         csv_source=csv_source,
+        paths=paths,
         agents=agents,
     )

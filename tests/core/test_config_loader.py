@@ -33,6 +33,7 @@ agents:
     assert settings.model_id == "foo"
     assert settings.scraper.rate_limit_per_min == 10
     assert settings.agents["query"].token_budget == 123
+    assert settings.paths is None
 
 
 def test_load_settings_handles_csv_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,6 +51,8 @@ data_sources:
   csv:
     path_env: CSV_DATA_PATH
     table_name: dataset
+paths:
+  scrapes_dir: assets/scrapes
 agents: {}
         """,
         encoding="utf-8",
@@ -59,3 +62,5 @@ agents: {}
     settings = load_settings(config_path)
     assert settings.csv_source is not None
     assert settings.csv_source.resolve_path() == csv_file
+    assert settings.paths is not None
+    assert settings.paths.scrapes_dir == "assets/scrapes"

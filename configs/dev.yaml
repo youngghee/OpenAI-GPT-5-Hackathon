@@ -3,6 +3,8 @@ codex_id: gpt-5-codex-pro
 scraper:
   rate_limit_per_min: 30
   default_timeout_s: 15
+paths:
+  scrapes_dir: assets/scrapes
 data_sources:
   csv:
     path_env: CSV_DATA_PATH
