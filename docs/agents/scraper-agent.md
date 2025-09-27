@@ -10,7 +10,7 @@
   - Flag ambiguous or conflicting evidence for manual review instead of auto-ingesting.
 
 ## Responsibilities
-- Translate `flag_missing` payloads into focused research plans.
+- Translate `flag_missing` payloads into focused research plans. When configured with the GPT-5 Responses model (`response_model_id`), the agent asks the LLM—via the OpenAI Agents SDK when available—to draft targeted search directives before falling back to rule-based heuristics.
 - Coordinate optional subagents to gather and normalize evidence.
 - Call the OpenAI Responses API web-search tool when configured (`search.provider: openai`)
   to retrieve canonical snippets and metadata.
@@ -18,5 +18,5 @@
 - Return structured task lists and summary statistics to the runner for traceability.
 
 ## Observability
-- Emit JSONL progress events (`scrape_plan_created`, `scrape_task_started`, etc.) to `logs/scraper/<ticket>.jsonl`.
+- Emit JSONL progress events (`scrape_plan_created`, `scrape_task_started`, `llm_plan_created`, etc.) to `logs/scraper/<ticket>.jsonl`.
 - Track external API usage to enforce rate limits and cost controls. Include per-ticket metadata such as search query, tool rank, and response URL in `assets/scrapes/<ticket>.jsonl` for auditability.

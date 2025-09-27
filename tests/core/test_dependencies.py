@@ -23,6 +23,7 @@ def base_settings() -> Settings:
     return Settings(
         model_id="gpt-5-enterprise",
         codex_id="gpt-5-codex-pro",
+        response_model_id="",
         scraper=ScraperSettings(rate_limit_per_min=30, default_timeout_s=15),
         csv_source=None,
         paths=PathsSettings(scrapes_dir=None, schema_escalations_dir=None, migrations_dir=None),
@@ -41,6 +42,7 @@ def test_build_dependencies_uses_in_memory_when_no_csv(base_settings: Settings) 
     assert deps.schema_agent is not None
     assert deps.query_logger is not None
     assert deps.scraper_logger is not None
+    assert deps.gpt_client is None
 
 
 def test_build_dependencies_uses_csv_path(
@@ -61,6 +63,7 @@ def test_build_dependencies_uses_csv_path(
     assert deps.schema_agent is not None
     assert deps.query_logger is not None
     assert deps.scraper_logger is not None
+    assert deps.gpt_client is None
 
 
 def test_build_dependencies_uses_openai_search(

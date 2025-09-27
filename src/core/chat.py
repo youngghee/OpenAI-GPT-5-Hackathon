@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from uuid import uuid4
@@ -10,6 +12,9 @@ from uuid import uuid4
 from src.core.config import load_settings
 from src.core.dependencies import RunnerDependencies, build_dependencies
 from src.core.runner import run_scenario
+from src.core.observability import QueryObservationSink, ScraperObservationSink
+from src.agents.update_agent import UpdateAgent
+from src.agents.schema_agent import SchemaAgent
 
 _exit_commands = {"/exit", "exit", "quit", ":q"}
 
@@ -24,12 +29,15 @@ class ChatCLI:
     primary_key_column: str = "BRIZO_ID"
     table_name: str = "dataset"
     session_id_factory: Callable[[], str] = field(default=lambda: f"session-{uuid4().hex[:8]}")
+    _observers_attached: bool = field(default=False, init=False)
 
     def start(self, record_id: str | None = None) -> None:
         """Launch an interactive chat session."""
 
         session_id = self.session_id_factory()
         record = record_id or self._ask_non_empty("Enter record id: ")
+
+        self._attach_observers()
 
         self.output_func(
             "Type questions to query the dataset. Use '/record <id>' to switch context,"
@@ -142,6 +150,176 @@ class ChatCLI:
             if value:
                 return value
             self.output_func("Value cannot be empty.")
+
+    def _attach_observers(self) -> None:
+        if self._observers_attached:
+            return
+
+        downstream_query = getattr(self.dependencies, "query_logger", None)
+        query_logger = ChatQueryLogger(downstream=downstream_query, emit=self.output_func)
+        self.dependencies.query_logger = query_logger
+
+        downstream_scraper = getattr(self.dependencies, "scraper_logger", None)
+        scraper_logger = ChatScraperLogger(downstream=downstream_scraper, emit=self.output_func)
+        self.dependencies.scraper_logger = scraper_logger
+
+        if self.dependencies.scraper_agent is not None:
+            self.dependencies.scraper_agent.logger = scraper_logger
+
+        if self.dependencies.update_agent is not None:
+            self.dependencies.update_agent = ChatUpdateAgent(
+                inner=self.dependencies.update_agent,
+                emit=self.output_func,
+            )
+
+        if self.dependencies.schema_agent is not None:
+            self.dependencies.schema_agent = ChatSchemaAgent(
+                inner=self.dependencies.schema_agent,
+                emit=self.output_func,
+            )
+
+        self._observers_attached = True
+
+
+@dataclass(slots=True)
+class ChatQueryLogger(QueryObservationSink):
+    downstream: QueryObservationSink | None
+    emit: Callable[[str], None]
+
+    def log_event(self, ticket_id: str, event: str, payload: dict[str, Any]) -> None:  # type: ignore[override]
+        if self.downstream is not None:
+            self.downstream.log_event(ticket_id, event, payload)
+        message = describe_query_event(event, payload)
+        if message:
+            self.emit(f"  ↳ {message}")
+
+
+@dataclass(slots=True)
+class ChatScraperLogger(ScraperObservationSink):
+    downstream: ScraperObservationSink | None
+    emit: Callable[[str], None]
+
+    def log_event(self, ticket_id: str, event: str, payload: dict[str, Any]) -> None:  # type: ignore[override]
+        if self.downstream is not None:
+            self.downstream.log_event(ticket_id, event, payload)
+        message = describe_scraper_event(event, payload)
+        if message:
+            self.emit(f"  ↳ {message}")
+
+
+@dataclass(slots=True)
+class ChatUpdateAgent:
+    inner: UpdateAgent
+    emit: Callable[[str], None]
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self.inner, item)
+
+    def apply_enrichment(
+        self,
+        *,
+        ticket_id: str,
+        record_id: str,
+        enriched_fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        if enriched_fields:
+            self.emit("  ↳ Passing new fields to the update agent.")
+        else:
+            self.emit("  ↳ Update agent check with no new fields provided.")
+        result = self.inner.apply_enrichment(
+            ticket_id=ticket_id, record_id=record_id, enriched_fields=enriched_fields
+        )
+        status = result.get("status")
+        if status:
+            self.emit(f"  ↳ Update agent finished with status '{status}'.")
+        return result
+
+
+@dataclass(slots=True)
+class ChatSchemaAgent:
+    inner: SchemaAgent
+    emit: Callable[[str], None]
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self.inner, item)
+
+    def propose_change(
+        self,
+        *,
+        ticket_id: str,
+        evidence_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.emit("  ↳ Escalating to schema agent for review.")
+        result = self.inner.propose_change(ticket_id=ticket_id, evidence_summary=evidence_summary)
+        columns = result.get("columns") or []
+        if columns:
+            self.emit(
+                "  ↳ Schema agent proposed columns: "
+                + ", ".join(str(col.get("name")) for col in columns if isinstance(col, dict))
+            )
+        else:
+            self.emit("  ↳ Schema agent found no structural changes needed.")
+        return result
+
+
+def describe_query_event(event: str, payload: dict[str, Any]) -> str:
+    if event == "question_received":
+        question = payload.get("question")
+        return f"Received question: {question}" if question else "Received question."
+    if event == "sql_executed":
+        statement = payload.get("statement", "SQL executed")
+        return f"Ran SQL to fetch the record." if statement else "Ran SQL query."
+    if event == "record_fetch_result":
+        found = payload.get("found")
+        return "Record found in dataset." if found else "No record found for the requested id."
+    if event == "columns_inferred":
+        columns = payload.get("columns")
+        if columns:
+            return "Identified relevant columns: " + ", ".join(str(c) for c in columns)
+        return "Could not map the question to existing columns."
+    if event == "missing_data_flagged":
+        reason = payload.get("facts", {}).get("reason", "missing data")
+        return f"Flagged missing data ({reason}); asking the scraper agent to investigate."
+    if event == "answer_ready":
+        columns = payload.get("columns", [])
+        if columns:
+            return "Answer ready with columns: " + ", ".join(str(c) for c in columns)
+        return "Answer ready."
+    if event == "llm_answer":
+        columns = payload.get("columns", [])
+        if columns:
+            return "LLM supplied values for: " + ", ".join(str(c) for c in columns)
+        return "LLM produced an answer."
+    if event == "question_resolved":
+        status = payload.get("status")
+        return f"Completed question with status '{status}'."
+    if event == "llm_error":
+        return "LLM request failed; falling back to deterministic logic."
+    return f"Query event: {event}"
+
+
+def describe_scraper_event(event: str, payload: dict[str, Any]) -> str:
+    if event == "scrape_plan_created":
+        count = payload.get("task_count", 0)
+        return f"Prepared {count} follow-up search task(s)."
+    if event == "llm_plan_created":
+        count = payload.get("task_count", 0)
+        return f"LLM generated {count} search suggestion(s)."
+    if event == "scrape_task_started":
+        topic = payload.get("topic", "general")
+        return f"Searching for '{topic}'."
+    if event == "scrape_task_completed":
+        topic = payload.get("topic", "general")
+        results = payload.get("result_count", 0)
+        return f"Finished searching '{topic}' with {results} result(s)."
+    if event == "scrape_findings_persisted":
+        count = payload.get("count", 0)
+        return f"Saved {count} finding(s) to the evidence log."
+    if event == "scrape_no_findings":
+        return "Search completed with no new findings."
+    if event == "llm_error":
+        return "LLM search planning failed; using fallback heuristics."
+    return f"Scraper event: {event}"
 
 
 def main() -> None:

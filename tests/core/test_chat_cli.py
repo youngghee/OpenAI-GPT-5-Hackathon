@@ -131,6 +131,7 @@ def test_chat_cli_answers_question() -> None:
 
     assert any("status: answered" in line for line in outputs)
     assert any("BUSINESS_NAME" in line for line in outputs)
+    assert any(line.startswith("  ↳ Received question") for line in outputs)
 
 
 def test_chat_cli_supports_record_switch() -> None:
@@ -156,5 +157,6 @@ def test_chat_cli_supports_record_switch() -> None:
 
     assert "Active record set to row-2." in outputs
     assert any("Cafe Two" in line for line in outputs)
+    assert any(line.startswith("  ↳ Received question") for line in outputs)
     # Ensure prompts reflect the active record id
     assert prompts and prompts[0].startswith("[row-1]")

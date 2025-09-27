@@ -38,12 +38,17 @@ class _LoggerStub(QueryObservationSink):
 
 
 def _make_agent(
-    rows: list[dict[str, Any]], logger: QueryObservationSink | None = None
+    rows: list[dict[str, Any]], logger: QueryObservationSink | None = None, llm_client: Any | None = None
 ) -> tuple[QueryAgent, _SQLExecutorStub, _FlaggerStub]:
     executor = _SQLExecutorStub(rows=rows)
     flagger = _FlaggerStub()
     return (
-        QueryAgent(sql_executor=executor, missing_data_flagger=flagger, logger=logger),
+        QueryAgent(
+            sql_executor=executor,
+            missing_data_flagger=flagger,
+            llm_client=llm_client,
+            logger=logger,
+        ),
         executor,
         flagger,
     )
@@ -132,3 +137,52 @@ def test_answer_question_emits_observability_events() -> None:
     assert "record_fetch_result" in events
     assert "columns_inferred" in events
     assert events.count("question_resolved") == 1
+
+
+class _LLMResponse:
+    def __init__(self, text: str) -> None:
+        self.output = [
+            type(
+                "Block",
+                (),
+                {
+                    "content": [type("Text", (), {"text": text})()],
+                },
+            )()
+        ]
+
+
+class _LLMClientStub:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def generate(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        max_output_tokens: int | None = None,
+        tools=None,
+        response_format: dict[str, Any] | None = None,
+    ) -> Any:  # type: ignore[override]
+        self.calls.append({"messages": messages})
+        return _LLMResponse('{"BUSINESS_NAME": "Example LLC"}')
+
+
+def test_query_agent_uses_llm_when_columns_missing() -> None:
+    rows = [
+        {
+            "BRIZO_ID": "abc",
+            "BUSINESS_NAME": "",
+        }
+    ]
+    llm = _LLMClientStub()
+    agent, _, flagger = _make_agent(rows, llm_client=llm)
+
+    result = agent.answer_question(
+        ticket_id="T-llm", question="What is the business name?", record_id="abc"
+    )
+
+    assert result["status"] == "answered"
+    assert result["answers"] == {"BUSINESS_NAME": "Example LLC"}
+    assert not flagger.calls
+    assert llm.calls

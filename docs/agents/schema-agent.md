@@ -11,7 +11,7 @@
 
 ## Responsibilities
 - Analyse unresolved enrichment tickets and identify schema gaps.
-- Propose new columns with inferred data types, nullable defaults, and documentation context.
+- Propose new columns with inferred data types, nullable defaults, and documentation context. When GPT-5 (`response_model_id`) is available, proposals are sourced from the Agents SDK response before falling back to deterministic inference.
 - Emit timestamped SQL migrations to `schema/migrations/` via the shared migration writer.
 
 ## Observability

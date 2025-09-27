@@ -24,6 +24,29 @@ class _SchemaEscalatorStub(SchemaEscalator):
         self.escalations.append({"ticket_id": ticket_id, "rationale": rationale})
 
 
+class _LLMStub:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls: list[dict[str, Any]] = []
+
+    def generate(self, *, messages, max_output_tokens=None, tools=None):  # type: ignore[override]
+        self.calls.append({"messages": messages})
+
+        class _Response:
+            def __init__(self, text: str) -> None:
+                self.output = [
+                    type(
+                        "Block",
+                        (),
+                        {
+                            "content": [type("Text", (), {"text": text})()],
+                        },
+                    )()
+                ]
+
+        return _Response(self.text)
+
+
 def test_apply_enrichment_updates_known_fields() -> None:
     crm = _CRMStub()
     escalator = _SchemaEscalatorStub()
@@ -61,6 +84,28 @@ def test_apply_enrichment_escalates_unknown_fields() -> None:
         "NEW_METRIC": 42
     }
     assert crm.updates == []
+
+
+def test_apply_enrichment_generates_reasoning_with_llm() -> None:
+    crm = _CRMStub()
+    escalator = _SchemaEscalatorStub()
+    llm = _LLMStub("Applied BUSINESS_NAME; no issues detected.")
+    agent = UpdateAgent(
+        crm_client=crm,
+        schema_escalator=escalator,
+        allowed_fields={"BUSINESS_NAME"},
+        llm_client=llm,
+    )
+
+    summary = agent.apply_enrichment(
+        ticket_id="T-llm",
+        record_id="row-1",
+        enriched_fields={"business_name": "New Name"},
+    )
+
+    assert "reasoning" in summary
+    assert "BUSINESS_NAME" in summary["reasoning"]
+    assert llm.calls
 
 
 def test_apply_enrichment_ignores_empty_values() -> None:

@@ -41,6 +41,29 @@ class _ScraperLoggerStub(ScraperObservationSink):
         self.events.append((ticket_id, event, payload))
 
 
+class _LLMStub:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls: list[dict[str, Any]] = []
+
+    def generate(self, *, messages: list[dict[str, str]], max_output_tokens: int | None = None, tools=None) -> Any:  # type: ignore[override]
+        self.calls.append({"messages": messages})
+
+        class _Response:
+            def __init__(self, payload: str) -> None:
+                self.output = [
+                    type(
+                        "Block",
+                        (),
+                        {
+                            "content": [type("Text", (), {"text": payload})()],
+                        },
+                    )()
+                ]
+
+        return _Response(self.text)
+
+
 def test_plan_research_for_missing_columns() -> None:
     agent = ScraperAgent(
         search_client=_SearchClientStub(responses={}),
@@ -103,3 +126,23 @@ def test_execute_plan_logs_when_no_findings() -> None:
     assert not outcome.findings
     events = [event for _, event, _ in logger.events]
     assert "scrape_no_findings" in events
+
+
+def test_llm_plan_creates_tasks() -> None:
+    llm = _LLMStub("BUSINESS_NAME|what is the business name? | Look for official site")
+    logger = _ScraperLoggerStub()
+    agent = ScraperAgent(
+        search_client=_SearchClientStub(responses={}),
+        evidence_sink=_SinkStub(),
+        logger=logger,
+        llm_client=llm,
+    )
+
+    tasks = agent.plan_research(
+        question="What is the business name?",
+        missing_facts={"missing_columns": ["BUSINESS_NAME"]},
+        ticket_id="T-LLM",
+    )
+
+    assert tasks and tasks[0].topic == "BUSINESS_NAME"
+    assert llm.calls

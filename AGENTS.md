@@ -7,7 +7,7 @@ The query bot answers row-level questions with GPT-5, using Codex to run SQL whe
 Keep agents in `src/agents/` and orchestration kernels in `src/core/`. Connectors and third-party APIs live under `src/integrations/`, with prompt templates in `assets/prompts/`. Place database schemas and migration plans in `schema/`, configuration in `configs/{environment}.yaml`, and runtime narratives or ADRs in `docs/`. Tests must mirror package paths under `tests/`.
 
 ## Model & Codex Requirements
-Default to GPT-5 Enterprise for reasoning and GPT-5 Codex Pro for tool execution; pin both in environment configs and expose overrides via `MODEL_ID` and `CODEX_ID`. Capture token budgets, rate limits, and safety instructions in each agent’s entry within `docs/agents/`.
+Default to GPT-5 Enterprise for reasoning and GPT-5 Codex Pro for tool execution; pin both in environment configs and expose overrides via `MODEL_ID` and `CODEX_ID`. Agents that require natural language synthesis (query, scraper) use the `response_model_id` (default `gpt-5`) via the OpenAI Agents SDK when available, automatically falling back to the Responses API otherwise. Capture token budgets, rate limits, and safety instructions in each agent’s entry within `docs/agents/`.
 
 ## Development Workflow
 Bootstrap with `python -m venv .venv` and `pip install -r requirements.txt`. Format via `black src tests` and lint with `ruff check src tests`. Run multi-agent simulations through `python -m src.core.runner --profile dev` and verify pipelines with `pytest --maxfail=1 --disable-warnings`. Use `make ci` before any pull request to chain lint, type, and test checks.

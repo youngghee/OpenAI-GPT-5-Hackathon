@@ -11,11 +11,13 @@ small adapter objects to keep the orchestration logic thin and testable.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.core.observability import QueryObservationSink
+from src.integrations.openai_agent_sdk import OpenAIAgentAdapter
 
 TOKEN_MIN_LENGTH = 3
 
@@ -50,6 +52,7 @@ class QueryAgent:
 
     sql_executor: SQLExecutor
     missing_data_flagger: MissingDataFlagger
+    llm_client: OpenAIAgentAdapter | None = None
     primary_key_column: str = "BRIZO_ID"
     table_name: str = "dataset"
     max_columns: int = 3
@@ -103,7 +106,7 @@ class QueryAgent:
             )
             return result
 
-        answers = {column: row[column] for column in columns if self._has_value(row.get(column))}
+        answers = self._resolve_answers(ticket_id, question, row, columns)
         if not answers:
             self._flag_missing(
                 ticket_id,
@@ -188,6 +191,98 @@ class QueryAgent:
             if len(unique_candidates) >= self.max_columns:
                 break
         return unique_candidates
+
+    def _resolve_answers(
+        self,
+        ticket_id: str,
+        question: str,
+        row: dict[str, Any],
+        columns: list[str],
+    ) -> dict[str, Any]:
+        if self.llm_client:
+            llm_answers = self._resolve_answers_with_llm(ticket_id, question, row)
+            if llm_answers:
+                return llm_answers
+
+        direct_answers = {column: row[column] for column in columns if self._has_value(row.get(column))}
+        return direct_answers
+
+    def _resolve_answers_with_llm(
+        self, ticket_id: str, question: str, row: dict[str, Any]
+    ) -> dict[str, Any]:
+        if self.llm_client is None:
+            return {}
+
+        prompt = self._build_prompt(question, row)
+        try:
+            response = self.llm_client.generate(messages=prompt)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            self._log_event(
+                ticket_id,
+                "llm_error",
+                {"error": str(exc)},
+            )
+            return {}
+
+        answers = self._extract_answers_from_response(response, row)
+        if answers:
+            self._log_event(
+                ticket_id,
+                "llm_answer",
+                {"columns": list(answers.keys())},
+            )
+        return answers
+
+    def _build_prompt(self, question: str, row: dict[str, Any]) -> list[dict[str, str]]:
+        context = json.dumps(row, ensure_ascii=False)
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "You are a CRM analyst. Use the provided record JSON to answer the"
+                    " stakeholder's question. Respond with a JSON object whose keys are"
+                    " relevant column names from the record and whose values are the"
+                    " corresponding answers. If information is missing, omit the key."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Record JSON: {context}\nQuestion: {question}",
+            },
+        ]
+
+    @staticmethod
+    def _extract_answers_from_response(response: Any, row: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover - thin wrapper
+        output = getattr(response, "output", [])
+        candidates: list[str] = []
+        for item in output:
+            content = getattr(item, "content", None)
+            if not content:
+                continue
+            if isinstance(content, list):
+                for block in content:
+                    text = getattr(block, "text", "")
+                    if text:
+                        candidates.append(text)
+            else:
+                text = getattr(content, "text", "")
+                if text:
+                    candidates.append(text)
+
+        for text in candidates:
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                filtered = {
+                    key: value
+                    for key, value in payload.items()
+                    if key in row and QueryAgent._has_value(value)
+                }
+                if filtered:
+                    return filtered
+        return {}
 
     @staticmethod
     def _has_value(value: Any) -> bool:

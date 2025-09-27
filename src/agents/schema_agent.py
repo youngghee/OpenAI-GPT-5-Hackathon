@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from src.integrations.openai_agent_sdk import OpenAIAgentAdapter
+
 
 class MigrationWriter(Protocol):
     """Outputs SQL migration scripts for schema changes."""
@@ -37,6 +39,7 @@ class SchemaAgent:
 
     migration_writer: MigrationWriter
     table_name: str = "dataset"
+    llm_client: OpenAIAgentAdapter | None = None
 
     def propose_change(self, *, ticket_id: str, evidence_summary: dict[str, Any]) -> dict[str, Any]:
         """Return column specifications and migration metadata for review."""
@@ -51,23 +54,25 @@ class SchemaAgent:
                 "notes": "No unknown fields supplied",
             }
 
-        proposals: list[ColumnProposal] = []
-        statements: list[str] = []
-        for raw_name, sample in unknown_fields.items():
-            column_name = self._normalize_name(raw_name)
-            sql_type = self._infer_sql_type(sample)
-            description = self._describe_source(sample)
-            proposals.append(
-                ColumnProposal(
-                    name=column_name,
-                    data_type=sql_type,
-                    nullable=True,
-                    description=description,
+        proposals = self._generate_proposals(unknown_fields)
+        if not proposals:
+            for raw_name, sample in unknown_fields.items():
+                column_name = self._normalize_name(raw_name)
+                sql_type = self._infer_sql_type(sample)
+                description = self._describe_source(sample)
+                proposals.append(
+                    ColumnProposal(
+                        name=column_name,
+                        data_type=sql_type,
+                        nullable=True,
+                        description=description,
+                    )
                 )
-            )
-            statements.append(
-                f'ALTER TABLE {self.table_name} ADD COLUMN IF NOT EXISTS "{column_name}" {sql_type};'
-            )
+
+        statements = [
+            f'ALTER TABLE {self.table_name} ADD COLUMN IF NOT EXISTS "{proposal.name}" {proposal.data_type};'
+            for proposal in proposals
+        ]
 
         migration_name = f"ticket_{ticket_id.lower()}"
         migration_path = self.migration_writer.write_migration(
@@ -105,3 +110,70 @@ class SchemaAgent:
         if isinstance(sample, (dict, list)):
             return "JSONB"
         return "TEXT"
+
+    def _generate_proposals(self, unknown_fields: dict[str, Any]) -> list[ColumnProposal]:
+        if self.llm_client is None:
+            return []
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You design database columns. Given unknown field names and example"
+                    " values, respond with JSON: [{\"name\":...,\"data_type\":...,\"nullable\":bool,\"description\":...}]."
+                ),
+            },
+            {
+                "role": "user",
+                "content": str(unknown_fields),
+            },
+        ]
+        try:
+            response = self.llm_client.generate(messages=messages)
+        except Exception:
+            return []
+        payload = _extract_schema_json(response)
+        proposals: list[ColumnProposal] = []
+        for item in payload:
+            name = item.get("name")
+            data_type = item.get("data_type") or item.get("datatype")
+            nullable = item.get("nullable", True)
+            description = item.get("description", "")
+            if name and data_type:
+                proposals.append(
+                    ColumnProposal(
+                        name=self._normalize_name(name),
+                        data_type=str(data_type).upper(),
+                        nullable=bool(nullable),
+                        description=description,
+                    )
+                )
+        return proposals
+
+
+def _extract_schema_json(response: Any) -> list[dict[str, Any]]:  # pragma: no cover - helper akin to other parsers
+    output = getattr(response, "output", [])
+    for item in output:
+        content = getattr(item, "content", None)
+        if isinstance(content, list):
+            for block in content:
+                text = getattr(block, "text", "")
+                if text:
+                    parsed = _safe_load_json(text)
+                    if isinstance(parsed, list):
+                        return [dict(entry) for entry in parsed if isinstance(entry, dict)]
+        else:
+            text = getattr(content, "text", "")
+            if text:
+                parsed = _safe_load_json(text)
+                if isinstance(parsed, list):
+                    return [dict(entry) for entry in parsed if isinstance(entry, dict)]
+    return []
+
+
+def _safe_load_json(text: str) -> Any:  # pragma: no cover - helper
+    import json
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None

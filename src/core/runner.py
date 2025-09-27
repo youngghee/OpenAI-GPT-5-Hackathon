@@ -119,6 +119,7 @@ def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> 
     agent = QueryAgent(
         sql_executor=dependencies.sql_executor,
         missing_data_flagger=dependencies.missing_data_flagger,
+        llm_client=dependencies.gpt_client,
         primary_key_column=primary_key,
         table_name=table_name,
         logger=dependencies.query_logger,

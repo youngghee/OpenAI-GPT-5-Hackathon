@@ -58,6 +58,7 @@ class SearchSettings:
 class Settings:
     model_id: str
     codex_id: str
+    response_model_id: str
     scraper: ScraperSettings
     csv_source: CSVSourceSettings | None
     paths: PathsSettings | None
@@ -128,6 +129,7 @@ def load_settings(path: str | Path) -> Settings:
     return Settings(
         model_id=str(raw.get("model_id", "")),
         codex_id=str(raw.get("codex_id", "")),
+        response_model_id=str(raw.get("response_model_id", "")),
         scraper=scraper,
         csv_source=csv_source,
         paths=paths,

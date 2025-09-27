@@ -1,5 +1,6 @@
 model_id: gpt-5-enterprise
 codex_id: gpt-5-codex-pro
+response_model_id: gpt-5
 scraper:
   rate_limit_per_min: 30
   default_timeout_s: 15
