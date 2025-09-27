@@ -14,11 +14,18 @@ from src.agents.update_agent import UpdateAgent
 from src.core.config import Settings
 from src.core.evidence import JSONLEvidenceSink
 from src.core.migrations import FileMigrationWriter
-from src.core.observability import JSONLQueryLogger, JSONLScraperLogger, QueryObservationSink, ScraperObservationSink
+from src.core.observability import (
+    JSONLQueryLogger,
+    JSONLScraperLogger,
+    QueryObservationSink,
+    ScraperObservationSink,
+)
 from src.core.missing_data import JSONLMissingDataFlagger
 from src.core.schema import JSONLSchemaEscalator
 from src.integrations.csv_sql_executor import CsvSQLExecutor
 from src.integrations.in_memory_sql_executor import InMemorySQLExecutor
+from src.integrations.openai_models import GPTResponseClient, OpenAIClientFactory
+from src.integrations.openai_agent_sdk import OpenAIAgentAdapter
 from src.integrations.openai_search import OpenAIWebSearchClient
 
 
@@ -33,6 +40,7 @@ class RunnerDependencies:
     schema_agent: SchemaAgent | None = None
     query_logger: QueryObservationSink | None = None
     scraper_logger: ScraperObservationSink | None = None
+    gpt_client: GPTResponseClient | None = None
 
 
 def build_dependencies(settings: Settings) -> RunnerDependencies:
@@ -54,6 +62,7 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
         search_client=search_client,
         evidence_sink=evidence_sink,
         logger=scraper_logger,
+        llm_client=None,  # placeholder; updated after response client construction
     )
 
     schema_dir = _resolve_schema_dir(settings)
@@ -65,11 +74,19 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
         crm_client=crm_client,
         schema_escalator=schema_escalator,
         allowed_fields=None,
+        llm_client=None,
     )
-    schema_agent = SchemaAgent(migration_writer=migration_writer)
+    schema_agent = SchemaAgent(migration_writer=migration_writer, llm_client=None)
 
     query_logs_dir = _resolve_query_logs_dir(settings)
     query_logger = JSONLQueryLogger(base_dir=query_logs_dir)
+    gpt_client = _build_response_client(settings)
+    agent_client = _build_agent_client(settings, gpt_client)
+
+    if gpt_client is not None:
+        scraper_agent.llm_client = gpt_client
+        update_agent.llm_client = gpt_client
+        schema_agent.llm_client = gpt_client
 
     return RunnerDependencies(
         sql_executor=executor,
@@ -79,6 +96,7 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
         schema_agent=schema_agent,
         query_logger=query_logger,
         scraper_logger=scraper_logger,
+        gpt_client=agent_client,
     )
 
 
@@ -168,3 +186,27 @@ def _resolve_scraper_logs_dir(settings: Settings) -> Path:
     path = Path(base).expanduser()
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _build_response_client(settings: Settings) -> GPTResponseClient | None:
+    if not settings.response_model_id:
+        return None
+    try:
+        factory = OpenAIClientFactory()
+        client = GPTResponseClient(model=settings.response_model_id, client_factory=factory)
+        # trigger lazy init to validate configuration early
+        client.client
+    except Exception:
+        return None
+    return client
+
+
+def _build_agent_client(
+    settings: Settings, fallback: GPTResponseClient | None
+) -> OpenAIAgentAdapter | None:
+    if not settings.response_model_id or fallback is None:
+        return fallback
+    try:
+        return OpenAIAgentAdapter(model=settings.response_model_id, fallback=fallback)
+    except Exception:
+        return fallback

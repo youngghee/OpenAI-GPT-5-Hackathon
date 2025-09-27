@@ -18,6 +18,29 @@ class _MigrationWriterStub:
         return self.path
 
 
+class _LLMStub:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls: list[dict[str, Any]] = []
+
+    def generate(self, *, messages, max_output_tokens=None, tools=None):  # type: ignore[override]
+        self.calls.append({"messages": messages})
+
+        class _Response:
+            def __init__(self, text: str) -> None:
+                self.output = [
+                    type(
+                        "Block",
+                        (),
+                        {
+                            "content": [type("Text", (), {"text": text})()],
+                        },
+                    )()
+                ]
+
+        return _Response(self.text)
+
+
 def test_schema_agent_generates_columns_and_migration() -> None:
     writer = _MigrationWriterStub()
     agent = SchemaAgent(migration_writer=writer, table_name="dataset")
@@ -44,3 +67,17 @@ def test_schema_agent_handles_no_unknown_fields() -> None:
     assert proposal["columns"] == []
     assert proposal["migration_path"] is None
     assert writer.calls == []
+
+
+def test_schema_agent_uses_llm_proposals() -> None:
+    writer = _MigrationWriterStub()
+    llm = _LLMStub('[{"name": "engagement_score", "data_type": "numeric", "nullable": false, "description": "Score from 0-1"}]')
+    agent = SchemaAgent(migration_writer=writer, llm_client=llm)
+
+    proposal = agent.propose_change(
+        ticket_id="T-llm",
+        evidence_summary={"unknown_fields": {"Engagement Score": 0.42}},
+    )
+
+    assert proposal["columns"][0]["name"] == "ENGAGEMENT_SCORE"
+    assert llm.calls

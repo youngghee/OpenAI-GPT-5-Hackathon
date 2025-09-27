@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.core.observability import ScraperObservationSink
+from src.integrations.openai_agent_sdk import OpenAIAgentAdapter
 
 
 class SearchClient(Protocol):
@@ -60,6 +61,7 @@ class ScraperAgent:
     evidence_sink: EvidenceSink
     default_limit: int = 5
     logger: ScraperObservationSink | None = None
+    llm_client: OpenAIAgentAdapter | None = None
 
     def plan_research(
         self, question: str, missing_facts: dict[str, Any], *, ticket_id: str | None = None
@@ -67,6 +69,16 @@ class ScraperAgent:
         """Return search directives for subagents based on identified gaps."""
 
         missing_columns = missing_facts.get("missing_columns", []) if missing_facts else []
+
+        if self.llm_client:
+            tasks = self._plan_with_llm(
+                question=question,
+                missing_columns=missing_columns,
+                ticket_id=ticket_id,
+            )
+            if tasks:
+                return tasks
+
         if not missing_columns:
             tasks = [
                 SearchTask(
@@ -172,3 +184,78 @@ class ScraperAgent:
         except Exception:
             # Observability must never block scraping.
             pass
+
+    def _plan_with_llm(
+        self,
+        *,
+        question: str,
+        missing_columns: list[str],
+        ticket_id: str | None,
+    ) -> list[SearchTask]:
+        if self.llm_client is None:
+            return []
+        column_text = ", ".join(missing_columns) if missing_columns else "none"
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You assist a scraper agent. Given a business question and missing"
+                    " attributes, propose specific web searches. Return up to 5 lines"
+                    " in the format 'topic | query | description'."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Question: {question}\nMissing columns: {column_text}\n"
+                    "Generate focused search directives."
+                ),
+            },
+        ]
+        try:
+            response = self.llm_client.generate(messages=messages)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            self._log_event(
+                ticket_id,
+                "llm_error",
+                {"error": str(exc)},
+            )
+            return []
+
+        tasks = self._parse_llm_plan(response)
+        if tasks:
+            self._log_event(
+                ticket_id,
+                "llm_plan_created",
+                {"task_count": len(tasks)},
+            )
+        return tasks
+
+    @staticmethod
+    def _parse_llm_plan(response: Any) -> list[SearchTask]:  # pragma: no cover - exercised via tests
+        lines: list[str] = []
+        output = getattr(response, "output", [])
+        for item in output:
+            content = getattr(item, "content", [])
+            if isinstance(content, list):
+                for block in content:
+                    text = getattr(block, "text", "")
+                    if text:
+                        lines.extend(line.strip() for line in text.splitlines() if line.strip())
+            else:
+                text = getattr(content, "text", "")
+                if text:
+                    lines.extend(line.strip() for line in text.splitlines() if line.strip())
+
+        tasks: list[SearchTask] = []
+        for raw in lines:
+            parts = [part.strip() for part in raw.split("|")]
+            if len(parts) < 2:
+                continue
+            topic = parts[0] or "general"
+            query = parts[1] or ""
+            description = parts[2] if len(parts) > 2 else ""
+            if not query:
+                continue
+            tasks.append(SearchTask(topic=topic, query=query, description=description))
+        return tasks
