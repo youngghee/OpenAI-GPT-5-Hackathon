@@ -11,8 +11,9 @@
 
 ## Responsibilities
 - Compare enriched facts against existing CRM attributes.
-- Apply deterministic field updates and log rationale for each change.
+- Apply deterministic field updates and log rationale for each change (logged via the in-memory CRM client in development or the production integration).
 - Escalate schema gaps with supporting context for downstream review.
+- Emit structured JSONL records under `schema/escalations/` summarising unknown or empty fields that blocked an update.
 
 ## Observability
 - Produce structured audit logs for each record update.

@@ -5,6 +5,7 @@ scraper:
   default_timeout_s: 15
 paths:
   scrapes_dir: assets/scrapes
+  schema_escalations_dir: schema/escalations
 data_sources:
   csv:
     path_env: CSV_DATA_PATH

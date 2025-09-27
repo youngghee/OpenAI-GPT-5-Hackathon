@@ -53,6 +53,7 @@ data_sources:
     table_name: dataset
 paths:
   scrapes_dir: assets/scrapes
+  schema_escalations_dir: schema/escalations
 agents: {}
         """,
         encoding="utf-8",
@@ -64,3 +65,4 @@ agents: {}
     assert settings.csv_source.resolve_path() == csv_file
     assert settings.paths is not None
     assert settings.paths.scrapes_dir == "assets/scrapes"
+    assert settings.paths.schema_escalations_dir == "schema/escalations"

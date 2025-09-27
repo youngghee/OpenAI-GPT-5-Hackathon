@@ -7,6 +7,7 @@ from typing import Any
 
 from src.agents.query_agent import MissingDataFlagger, SQLExecutor
 from src.agents.scraper_agent import ScrapeOutcome, SearchTask
+from src.agents.update_agent import UpdateAgent
 from src.core.dependencies import RunnerDependencies
 from src.core.runner import Runner, YamlScenarioLoader
 
@@ -56,6 +57,20 @@ class _ScraperStub:
         return self.outcome
 
 
+@dataclass
+class _UpdateAgentStub(UpdateAgent):
+    summaries: list[dict[str, Any]] = field(default_factory=list)
+
+    def apply_enrichment(self, *, ticket_id: str, record_id: str, enriched_fields: dict[str, Any]) -> dict[str, Any]:  # type: ignore[override]
+        summary = {
+            "ticket_id": ticket_id,
+            "record_id": record_id,
+            "fields": enriched_fields,
+        }
+        self.summaries.append(summary)
+        return {"status": "simulated", "fields": enriched_fields}
+
+
 def test_runner_executes_scenarios() -> None:
     loader = _ScenarioLoaderStub(
         scenarios=[
@@ -69,27 +84,26 @@ def test_runner_executes_scenarios() -> None:
     executor = _SQLExecutorStub(dataset={"row-1": {"BRIZO_ID": "row-1", "BUSINESS_NAME": "Cafe"}})
     flagger = _FlaggerStub()
     scraper = _ScraperStub(outcome=ScrapeOutcome(tasks=[], findings=[]))
+    updater = _UpdateAgentStub(crm_client=None, schema_escalator=None)  # type: ignore[arg-type]
     deps = RunnerDependencies(
         sql_executor=executor,
         missing_data_flagger=flagger,
         scraper_agent=scraper,
+        update_agent=updater,
     )
 
     runner = Runner(scenario_loader=loader, dependencies=deps)
 
     results = runner.execute(profile="dev")
 
-    assert results == [
-        {
-            "ticket_id": "T-1",
-            "record_id": "row-1",
-            "question": "What is the business name?",
-            "status": "answered",
-            "answers": {"BUSINESS_NAME": "Cafe"},
-        }
-    ]
+    assert len(results) == 1
+    result = results[0]
+    assert result["status"] == "answered"
+    assert result["answers"] == {"BUSINESS_NAME": "Cafe"}
+    assert result["update"]["status"] == "simulated"
     assert not flagger.calls
     assert not scraper.calls
+    assert updater.summaries and updater.summaries[0]["fields"] == {"BUSINESS_NAME": "Cafe"}
 
 
 def test_runner_flags_missing_records(tmp_path) -> None:
@@ -116,10 +130,12 @@ def test_runner_flags_missing_records(tmp_path) -> None:
             findings=[{"url": "https://example.com"}],
         )
     )
+    updater = _UpdateAgentStub(crm_client=None, schema_escalator=None)  # type: ignore[arg-type]
     deps = RunnerDependencies(
         sql_executor=executor,
         missing_data_flagger=flagger,
         scraper_agent=scraper,
+        update_agent=updater,
     )
 
     runner = Runner(scenario_loader=loader, dependencies=deps)
@@ -132,6 +148,7 @@ def test_runner_flags_missing_records(tmp_path) -> None:
     assert scraper.calls and scraper.calls[0]["missing_facts"]["status"] == "record_not_found"
     assert result["scraper_tasks"][0]["topic"] == "general"
     assert result["scraper_findings"] == 1
+    assert not updater.summaries
 
 
 def test_yaml_scenario_loader_reads_profiles(tmp_path) -> None:
