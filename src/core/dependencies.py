@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.agents.query_agent import MissingDataFlagger, SQLExecutor
+from src.agents.scraper_agent import ScraperAgent, SearchClient
 from src.core.config import Settings
+from src.core.evidence import JSONLEvidenceSink
 from src.core.missing_data import JSONLMissingDataFlagger
 from src.integrations.csv_sql_executor import CsvSQLExecutor
 from src.integrations.in_memory_sql_executor import InMemorySQLExecutor
@@ -18,6 +20,7 @@ class RunnerDependencies:
 
     sql_executor: SQLExecutor | None = None
     missing_data_flagger: MissingDataFlagger | None = None
+    scraper_agent: ScraperAgent | None = None
 
 
 def build_dependencies(settings: Settings) -> RunnerDependencies:
@@ -31,8 +34,15 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
 
     scrapes_dir = _resolve_scrapes_dir(settings)
     flagger = JSONLMissingDataFlagger(base_dir=scrapes_dir)
+    evidence_sink = JSONLEvidenceSink(base_dir=scrapes_dir)
+    search_client: SearchClient = NullSearchClient()
+    scraper_agent = ScraperAgent(search_client=search_client, evidence_sink=evidence_sink)
 
-    return RunnerDependencies(sql_executor=executor, missing_data_flagger=flagger)
+    return RunnerDependencies(
+        sql_executor=executor,
+        missing_data_flagger=flagger,
+        scraper_agent=scraper_agent,
+    )
 
 
 def _resolve_scrapes_dir(settings: Settings) -> Path:
@@ -44,3 +54,10 @@ def _resolve_scrapes_dir(settings: Settings) -> Path:
     path = Path(base).expanduser()
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+class NullSearchClient(SearchClient):
+    """Fallback search client that returns no results."""
+
+    def search(self, query: str, *, limit: int | None = None):  # type: ignore[override]
+        return []

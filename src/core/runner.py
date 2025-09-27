@@ -60,6 +60,8 @@ class Runner:
             raise ValueError("SQL executor dependency is required")
         if self.dependencies.missing_data_flagger is None:
             raise ValueError("Missing data flagger dependency is required")
+        if self.dependencies.scraper_agent is None:
+            raise ValueError("Scraper agent dependency is required")
 
         scenarios = self.scenario_loader.load(profile)
         results: list[dict[str, Any]] = []
@@ -83,6 +85,20 @@ class Runner:
                 question=question,
                 record_id=record_id,
             )
+            if result.get("status") != "answered":
+                missing_facts: dict[str, Any] = {"status": result.get("status")}
+                if "missing_columns" in result:
+                    missing_facts["missing_columns"] = result["missing_columns"]
+                outcome = self.dependencies.scraper_agent.execute_plan(
+                    ticket_id=ticket_id,
+                    question=question,
+                    missing_facts=missing_facts,
+                )
+                if outcome.tasks:
+                    result["scraper_tasks"] = [task.to_dict() for task in outcome.tasks]
+                if outcome.findings:
+                    result["scraper_findings"] = len(outcome.findings)
+
             results.append(result)
 
         return results

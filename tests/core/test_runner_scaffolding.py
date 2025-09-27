@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.agents.query_agent import MissingDataFlagger, SQLExecutor
+from src.agents.scraper_agent import ScrapeOutcome, SearchTask
 from src.core.dependencies import RunnerDependencies
 from src.core.runner import Runner, YamlScenarioLoader
 
@@ -39,6 +40,22 @@ class _FlaggerStub(MissingDataFlagger):
         self.calls.append({"ticket_id": ticket_id, "question": question, "facts": facts})
 
 
+@dataclass
+class _ScraperStub:
+    outcome: ScrapeOutcome
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def execute_plan(self, ticket_id: str, question: str, missing_facts: dict[str, Any]) -> ScrapeOutcome:  # type: ignore[override]
+        self.calls.append(
+            {
+                "ticket_id": ticket_id,
+                "question": question,
+                "missing_facts": missing_facts,
+            }
+        )
+        return self.outcome
+
+
 def test_runner_executes_scenarios() -> None:
     loader = _ScenarioLoaderStub(
         scenarios=[
@@ -51,7 +68,12 @@ def test_runner_executes_scenarios() -> None:
     )
     executor = _SQLExecutorStub(dataset={"row-1": {"BRIZO_ID": "row-1", "BUSINESS_NAME": "Cafe"}})
     flagger = _FlaggerStub()
-    deps = RunnerDependencies(sql_executor=executor, missing_data_flagger=flagger)
+    scraper = _ScraperStub(outcome=ScrapeOutcome(tasks=[], findings=[]))
+    deps = RunnerDependencies(
+        sql_executor=executor,
+        missing_data_flagger=flagger,
+        scraper_agent=scraper,
+    )
 
     runner = Runner(scenario_loader=loader, dependencies=deps)
 
@@ -67,6 +89,7 @@ def test_runner_executes_scenarios() -> None:
         }
     ]
     assert not flagger.calls
+    assert not scraper.calls
 
 
 def test_runner_flags_missing_records(tmp_path) -> None:
@@ -81,14 +104,34 @@ def test_runner_flags_missing_records(tmp_path) -> None:
     )
     executor = _SQLExecutorStub(dataset={})
     flagger = _FlaggerStub()
-    deps = RunnerDependencies(sql_executor=executor, missing_data_flagger=flagger)
+    scraper = _ScraperStub(
+        outcome=ScrapeOutcome(
+            tasks=[
+                SearchTask(
+                    query="What is the business name?",
+                    topic="general",
+                    description="General context",
+                )
+            ],
+            findings=[{"url": "https://example.com"}],
+        )
+    )
+    deps = RunnerDependencies(
+        sql_executor=executor,
+        missing_data_flagger=flagger,
+        scraper_agent=scraper,
+    )
 
     runner = Runner(scenario_loader=loader, dependencies=deps)
 
     results = runner.execute(profile="dev")
 
-    assert results[0]["status"] == "record_not_found"
+    result = results[0]
+    assert result["status"] == "record_not_found"
     assert flagger.calls and flagger.calls[0]["facts"]["reason"] == "record_not_found"
+    assert scraper.calls and scraper.calls[0]["missing_facts"]["status"] == "record_not_found"
+    assert result["scraper_tasks"][0]["topic"] == "general"
+    assert result["scraper_findings"] == 1
 
 
 def test_yaml_scenario_loader_reads_profiles(tmp_path) -> None:

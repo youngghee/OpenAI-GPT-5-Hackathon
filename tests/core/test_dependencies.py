@@ -33,6 +33,7 @@ def test_build_dependencies_uses_in_memory_when_no_csv(base_settings: Settings) 
     assert isinstance(deps, RunnerDependencies)
     assert deps.sql_executor is not None
     assert deps.missing_data_flagger is not None
+    assert deps.scraper_agent is not None
 
 
 def test_build_dependencies_uses_csv_path(
@@ -48,3 +49,4 @@ def test_build_dependencies_uses_csv_path(
     assert deps.sql_executor is not None
     assert deps.sql_executor.__class__.__name__ == "CsvSQLExecutor"
     assert deps.missing_data_flagger is not None
+    assert deps.scraper_agent is not None

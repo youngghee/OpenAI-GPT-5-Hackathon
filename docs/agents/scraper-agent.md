@@ -12,7 +12,8 @@
 ## Responsibilities
 - Translate `flag_missing` payloads into focused research plans.
 - Coordinate optional subagents to gather and normalize evidence.
-- Persist findings to `assets/scrapes/<ticket>.jsonl` with provenance metadata.
+- Persist findings to `assets/scrapes/<ticket>.jsonl` with provenance metadata via the shared JSONL evidence sink.
+- Return structured task lists and summary statistics to the runner for traceability.
 
 ## Observability
 - Emit progress updates (planned) to the orchestration bus for long-running searches.
