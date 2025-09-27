@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from src.core.config import Settings
 from src.integrations.csv_sql_executor import CsvSQLExecutor
@@ -14,7 +13,7 @@ from src.integrations.in_memory_sql_executor import InMemorySQLExecutor
 class RunnerDependencies:
     """Collection of optional dependencies used by the runner."""
 
-    sql_executor: Optional[object] = None
+    sql_executor: object | None = None
 
 
 def build_dependencies(settings: Settings) -> RunnerDependencies:

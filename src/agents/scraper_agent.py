@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Protocol
+from typing import Protocol
 
 
 class SearchClient(Protocol):
@@ -16,7 +17,9 @@ class SearchClient(Protocol):
 class EvidenceSink(Protocol):
     """Destinations that persist gathered evidence alongside provenance."""
 
-    def append(self, ticket_id: str, payload: dict[str, str]) -> None:  # pragma: no cover - interface
+    def append(
+        self, ticket_id: str, payload: dict[str, str]
+    ) -> None:  # pragma: no cover - interface
         """Store enriched facts for later reconciliation."""
 
 

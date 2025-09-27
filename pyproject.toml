@@ -26,13 +26,14 @@ include = "\\.(py|pyi)$"
 
 [tool.ruff]
 line-length = 100
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "TID", "PL"]
 ignore = ["E501"]
-exclude = [".venv", "build", "dist"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
-profile = "black"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

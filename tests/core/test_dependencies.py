@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import CSVSourceSettings, Settings, ScraperSettings, AgentSettings
+from src.core.config import AgentSettings, CSVSourceSettings, ScraperSettings, Settings
 from src.core.dependencies import RunnerDependencies, build_dependencies
 
 
@@ -27,7 +27,9 @@ def test_build_dependencies_uses_in_memory_when_no_csv(base_settings: Settings) 
     assert deps.sql_executor is not None
 
 
-def test_build_dependencies_uses_csv_path(tmp_path: Path, base_settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_dependencies_uses_csv_path(
+    tmp_path: Path, base_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
     csv_file = tmp_path / "records.csv"
     csv_file.write_text("id\n1\n", encoding="utf-8")
     base_settings.csv_source = CSVSourceSettings(path_env="CSV_DATA_PATH", table_name="records")

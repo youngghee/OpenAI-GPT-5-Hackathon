@@ -50,7 +50,7 @@ class CsvSQLExecutor:
                 raise ValueError("CSV file must include a header row")
 
             self._field_map = {name.lower(): name for name in reader.fieldnames}
-            self._rows = [row for row in reader]
+            self._rows = list(reader)
 
     def run(self, statement: str) -> list[dict[str, Any]]:
         match = _SELECT_RE.match(statement)
@@ -74,10 +74,7 @@ class CsvSQLExecutor:
         if selected_columns is None:
             return filtered
 
-        return [
-            {column: row.get(column) for column in selected_columns}
-            for row in filtered
-        ]
+        return [{column: row.get(column) for column in selected_columns} for row in filtered]
 
     def _resolve_field(self, name: str) -> str:
         resolved = self._field_map.get(name.lower())

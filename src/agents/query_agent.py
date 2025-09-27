@@ -25,7 +25,9 @@ class SQLExecutor(Protocol):
 class MissingDataFlagger(Protocol):
     """Dispatch hook used when the agent identifies a data gap."""
 
-    def flag_missing(self, ticket_id: str, question: str, facts: dict[str, Any]) -> None:  # pragma: no cover - interface
+    def flag_missing(
+        self, ticket_id: str, question: str, facts: dict[str, Any]
+    ) -> None:  # pragma: no cover - interface
         """Emit a signal for the scraper workflow with helpful context."""
 
 

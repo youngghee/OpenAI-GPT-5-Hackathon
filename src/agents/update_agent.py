@@ -9,7 +9,9 @@ from typing import Protocol
 class CRMClient(Protocol):
     """API surface for interacting with the source-of-truth system."""
 
-    def update_record(self, record_id: str, payload: dict[str, str]) -> None:  # pragma: no cover - interface
+    def update_record(
+        self, record_id: str, payload: dict[str, str]
+    ) -> None:  # pragma: no cover - interface
         """Persist deterministic updates for a CRM record."""
 
 
@@ -27,7 +29,9 @@ class UpdateAgent:
     crm_client: CRMClient
     schema_escalator: SchemaEscalator
 
-    def apply_enrichment(self, *, ticket_id: str, record_id: str, enriched_fields: dict[str, str]) -> None:
+    def apply_enrichment(
+        self, *, ticket_id: str, record_id: str, enriched_fields: dict[str, str]
+    ) -> None:
         """Attempt to persist new facts and escalate when schema gaps occur."""
 
         # TODO: detect unmapped fields and trigger schema escalation.

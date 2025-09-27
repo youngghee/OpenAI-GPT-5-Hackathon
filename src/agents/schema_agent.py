@@ -9,7 +9,9 @@ from typing import Protocol
 class MigrationWriter(Protocol):
     """Outputs SQL migration scripts for schema changes."""
 
-    def write_migration(self, *, name: str, statements: list[str]) -> str:  # pragma: no cover - interface
+    def write_migration(
+        self, *, name: str, statements: list[str]
+    ) -> str:  # pragma: no cover - interface
         """Persist a migration file and return its reference path."""
 
 

@@ -7,9 +7,7 @@ from src.integrations.in_memory_sql_executor import InMemorySQLExecutor
 
 def test_run_returns_canned_rows() -> None:
     executor = InMemorySQLExecutor(
-        canned_results={
-            "SELECT * FROM accounts WHERE id = '123'": [{"id": "123", "name": "Acme"}]
-        }
+        canned_results={"SELECT * FROM accounts WHERE id = '123'": [{"id": "123", "name": "Acme"}]}
     )
 
     rows = executor.run("SELECT * FROM accounts WHERE id = '123'")

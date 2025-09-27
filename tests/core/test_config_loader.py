@@ -1,5 +1,7 @@
 """Tests for loading application settings from YAML."""
 
+# ruff: noqa: PLR2004
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -24,9 +24,7 @@ class CSVSourceSettings:
     def resolve_path(self) -> Path:
         value = os.getenv(self.path_env)
         if not value:
-            raise EnvironmentError(
-                f"Environment variable '{self.path_env}' is required for CSV data source"
-            )
+            raise OSError(f"Environment variable '{self.path_env}' is required for CSV data source")
         path = Path(value).expanduser()
         if not path.exists():
             raise FileNotFoundError(f"CSV data source not found at '{path}'")
