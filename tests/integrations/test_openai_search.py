@@ -13,6 +13,7 @@ from src.integrations.openai_search import OpenAIWebSearchClient
 @dataclass
 class _ResponseObject:
     output: list[Any]
+    output_text: list[str] | None = None
 
 
 @dataclass
@@ -25,6 +26,17 @@ class _ToolContent:
 class _ToolResult:
     type: str
     tool_type: str
+    content: list[Any]
+
+
+@dataclass
+class _MessageBlock:
+    text: str | None = None
+
+
+@dataclass
+class _Message:
+    type: str
     content: list[Any]
 
 
@@ -83,6 +95,50 @@ def test_openai_web_search_client_handles_missing_tool_results() -> None:
     )
 
     assert client.search("query") == []
+
+
+def test_openai_web_search_client_falls_back_to_text_output() -> None:
+    response = _ResponseObject(
+        output=[
+            _Message(type="message", content=[_MessageBlock(text="Chipotle employs ~110,000 people.")])
+        ],
+        output_text=["Chipotle employs around 110,000 people."],
+    )
+    client_stub = _OpenAIClientStub(responses=response)
+    client = OpenAIWebSearchClient(
+        model="gpt-4.1-mini",
+        api_key="abc",
+        client_factory=lambda _: client_stub,
+        max_results=3,
+    )
+
+    results = client.search("query")
+
+    assert results[0]["text"].startswith("Chipotle employs")
+    assert {record["text"] for record in results} == {
+        "Chipotle employs ~110,000 people.",
+        "Chipotle employs around 110,000 people.",
+    }
+
+
+def test_openai_web_search_client_deduplicates_identical_text() -> None:
+    text = "Chipotle employs ~110,000 people."
+    response = _ResponseObject(
+        output=[_Message(type="message", content=[_MessageBlock(text=text)])],
+        output_text=[text],
+    )
+    client_stub = _OpenAIClientStub(responses=response)
+    client = OpenAIWebSearchClient(
+        model="gpt-4.1-mini",
+        api_key="abc",
+        client_factory=lambda _: client_stub,
+        max_results=3,
+    )
+
+    results = client.search("query")
+
+    assert len(results) == 1
+    assert results[0]["text"] == text
 
 
 def test_client_requires_api_key() -> None:

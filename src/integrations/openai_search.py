@@ -50,10 +50,18 @@ class OpenAIWebSearchClient:
     @staticmethod
     def _parse_response(response: Any, limit: int) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
+        seen_texts: set[str] = set()
         output = getattr(response, "output", [])
         for item in _ensure_iterable(output):
             item_type = _get_attr(item, "type")
             if item_type != "tool_result":
+                results.extend(
+                    _results_from_text_blocks(
+                        item, limit - len(results), seen_texts
+                    )
+                )
+                if len(results) >= limit:
+                    return results[:limit]
                 continue
             tool_type = _get_attr(item, "tool_type")
             if tool_type != "web_search":
@@ -68,10 +76,17 @@ class OpenAIWebSearchClient:
                             if len(results) >= limit:
                                 return results[:limit]
                 text = _get_attr(entry, "text")
-                if text:
+                if text and _remember_text(text, seen_texts):
                     results.append({"text": text})
                     if len(results) >= limit:
                         return results[:limit]
+        if len(results) < limit:
+            for text in _iter_output_text(response):
+                if not _remember_text(text, seen_texts):
+                    continue
+                results.append({"text": text})
+                if len(results) >= limit:
+                    break
         return results[:limit]
 
 
@@ -89,3 +104,53 @@ def _get_attr(obj: Any, name: str, default: Any | None = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(name, default)
     return getattr(obj, name, default)
+
+
+def _results_from_text_blocks(
+    item: Any, remaining: int, seen_texts: set[str]
+) -> list[dict[str, Any]]:
+    if remaining <= 0:
+        return []
+    texts: list[str] = []
+    content = _get_attr(item, "content", default=[])
+    for block in _ensure_iterable(content):
+        text = _get_attr(block, "text")
+        if text:
+            texts.append(text)
+        elif isinstance(block, str):
+            texts.append(block)
+        elif isinstance(block, dict):
+            # Some SDK builds return {"type": "output_text", "text": "..."}
+            maybe_text = block.get("output_text") if "output_text" in block else None
+            if maybe_text:
+                texts.extend(_ensure_iterable(maybe_text))
+    records: list[dict[str, Any]] = []
+    for text in texts:
+        if not _remember_text(text, seen_texts):
+            continue
+        records.append({"text": text})
+        if len(records) >= remaining:
+            break
+    return records
+
+
+def _iter_output_text(response: Any) -> Iterable[str]:
+    output_text = getattr(response, "output_text", None)
+    if output_text:
+        for text in _ensure_iterable(output_text):
+            if isinstance(text, str) and text.strip():
+                yield text
+    # Some client builds expose a .response output with consolidated text
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text.strip():
+        yield text
+
+
+def _remember_text(text: str, seen_texts: set[str]) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    if normalized in seen_texts:
+        return False
+    seen_texts.add(normalized)
+    return True
