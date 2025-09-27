@@ -58,6 +58,11 @@ flowchart TD
 - Configure agent model overrides via `configs/{environment}.yaml` (`model_id`, `codex_id`, and `search.model_id`).
 - Review structured observability traces under `logs/query/<ticket>.jsonl` and `logs/scraper/<ticket>.jsonl` (configurable via `paths.query_logs_dir` and `paths.scraper_logs_dir`) to debug agent behaviour.
 
+## Chat Interface
+- Launch the interactive UX with `python -m src.core.chat --record <record_id>` to iterate on a single record without editing YAML scenarios; the system issues conversation ids automatically for logging.
+- Inside the chat, type `/record <new_id>` or `/ticket <new_id>` to adjust context, and `/exit` when you are finished.
+- Each turn reuses the runner workflow, so updates and schema escalations behave identically to scripted simulations while providing conversational feedback in the terminal.
+
 ## Next Steps for Implementation
 - Document agent token budgets, rate limits, and safety guidance in `docs/agents/` to align operations.
 - Validate end-to-end behaviour by running `python -m src.core.runner --profile dev` and `make ci` before deployment.
