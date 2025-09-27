@@ -22,6 +22,14 @@ agent to behave as if it were connected to a warehouse.
 - Because the data resides entirely in memory, large exports may impact memory
   usage. Consider filtering or sampling the dataset for development scenarios.
 
+## Web Search Integration
+When enrichment requires external context, the scraper agent uses the OpenAI
+Responses API web-search tool. Configure this behaviour via the `search`
+section in `configs/{environment}.yaml` and set `OPENAI_API_KEY` (or the
+appropriate environment variable) in `.env`. With the key present, the
+dependency builder injects an `OpenAIWebSearchClient` so search results and
+snippets are captured alongside CSV-derived answers.
+
 ## Extending Support
 When the system transitions to a live database, replace
 `CsvSQLExecutor` with an adapter that implements `SQLExecutor`. Existing agents

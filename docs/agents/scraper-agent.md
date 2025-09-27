@@ -19,4 +19,4 @@
 
 ## Observability
 - Emit progress updates (planned) to the orchestration bus for long-running searches.
-- Track external API usage to enforce rate limits and cost controls.
+- Track external API usage to enforce rate limits and cost controls. Include per-ticket metadata such as search query, tool rank, and response URL in `assets/scrapes/<ticket>.jsonl` for auditability.
