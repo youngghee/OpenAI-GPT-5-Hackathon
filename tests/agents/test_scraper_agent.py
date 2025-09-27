@@ -8,6 +8,7 @@ from typing import Any
 
 from src.agents.scraper_agent import ScraperAgent, SearchClient
 from src.core.evidence import EvidenceSink, JSONLEvidenceSink
+from src.core.observability import ScraperObservationSink
 
 
 @dataclass
@@ -30,6 +31,14 @@ class _SinkStub(EvidenceSink):
     def bulk_append(self, ticket_id: str, payloads: Any) -> None:  # type: ignore[override]
         for payload in payloads:
             self.append(ticket_id, payload)
+
+
+@dataclass
+class _ScraperLoggerStub(ScraperObservationSink):
+    events: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+
+    def log_event(self, ticket_id: str, event: str, payload: dict[str, Any]) -> None:  # type: ignore[override]
+        self.events.append((ticket_id, event, payload))
 
 
 def test_plan_research_for_missing_columns() -> None:
@@ -55,7 +64,8 @@ def test_execute_plan_persists_findings(tmp_path: Path) -> None:
         responses={query: [{"url": "https://example.com", "title": "Example"}]}
     )
     sink = JSONLEvidenceSink(base_dir=tmp_path)
-    agent = ScraperAgent(search_client=search_client, evidence_sink=sink)
+    logger = _ScraperLoggerStub()
+    agent = ScraperAgent(search_client=search_client, evidence_sink=sink, logger=logger)
 
     outcome = agent.execute_plan(
         ticket_id="T-1",
@@ -68,3 +78,28 @@ def test_execute_plan_persists_findings(tmp_path: Path) -> None:
     assert evidence_file.exists()
     content = evidence_file.read_text(encoding="utf-8").strip()
     assert "https://example.com" in content
+    events = [event for _, event, _ in logger.events]
+    assert "scrape_plan_created" in events
+    assert "scrape_task_started" in events
+    assert "scrape_task_completed" in events
+    assert "scrape_findings_persisted" in events
+
+
+def test_execute_plan_logs_when_no_findings() -> None:
+    search_client = _SearchClientStub(responses={})
+    logger = _ScraperLoggerStub()
+    agent = ScraperAgent(
+        search_client=search_client,
+        evidence_sink=_SinkStub(),
+        logger=logger,
+    )
+
+    outcome = agent.execute_plan(
+        ticket_id="T-2",
+        question="What is the business name?",
+        missing_facts={},
+    )
+
+    assert not outcome.findings
+    events = [event for _, event, _ in logger.events]
+    assert "scrape_no_findings" in events

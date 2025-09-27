@@ -36,6 +36,8 @@ class PathsSettings:
     scrapes_dir: str | None = None
     schema_escalations_dir: str | None = None
     migrations_dir: str | None = None
+    query_logs_dir: str | None = None
+    scraper_logs_dir: str | None = None
 
 
 @dataclass(slots=True)
@@ -95,10 +97,14 @@ def load_settings(path: str | Path) -> Settings:
         scrapes_dir = paths_raw.get("scrapes_dir")
         schema_dir = paths_raw.get("schema_escalations_dir")
         migrations_dir = paths_raw.get("migrations_dir")
+        query_logs_dir = paths_raw.get("query_logs_dir")
+        scraper_logs_dir = paths_raw.get("scraper_logs_dir")
         paths = PathsSettings(
             scrapes_dir=str(scrapes_dir) if scrapes_dir else None,
             schema_escalations_dir=str(schema_dir) if schema_dir else None,
             migrations_dir=str(migrations_dir) if migrations_dir else None,
+            query_logs_dir=str(query_logs_dir) if query_logs_dir else None,
+            scraper_logs_dir=str(scraper_logs_dir) if scraper_logs_dir else None,
         )
 
     search_raw = raw.get("search")

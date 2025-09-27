@@ -14,6 +14,7 @@ from src.agents.update_agent import UpdateAgent
 from src.core.config import Settings
 from src.core.evidence import JSONLEvidenceSink
 from src.core.migrations import FileMigrationWriter
+from src.core.observability import JSONLQueryLogger, JSONLScraperLogger, QueryObservationSink, ScraperObservationSink
 from src.core.missing_data import JSONLMissingDataFlagger
 from src.core.schema import JSONLSchemaEscalator
 from src.integrations.csv_sql_executor import CsvSQLExecutor
@@ -30,6 +31,8 @@ class RunnerDependencies:
     scraper_agent: ScraperAgent | None = None
     update_agent: UpdateAgent | None = None
     schema_agent: SchemaAgent | None = None
+    query_logger: QueryObservationSink | None = None
+    scraper_logger: ScraperObservationSink | None = None
 
 
 def build_dependencies(settings: Settings) -> RunnerDependencies:
@@ -45,7 +48,13 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
     flagger = JSONLMissingDataFlagger(base_dir=scrapes_dir)
     evidence_sink = JSONLEvidenceSink(base_dir=scrapes_dir)
     search_client: SearchClient = _build_search_client(settings)
-    scraper_agent = ScraperAgent(search_client=search_client, evidence_sink=evidence_sink)
+    scraper_logs_dir = _resolve_scraper_logs_dir(settings)
+    scraper_logger = JSONLScraperLogger(base_dir=scraper_logs_dir)
+    scraper_agent = ScraperAgent(
+        search_client=search_client,
+        evidence_sink=evidence_sink,
+        logger=scraper_logger,
+    )
 
     schema_dir = _resolve_schema_dir(settings)
     schema_escalator = JSONLSchemaEscalator(base_dir=schema_dir)
@@ -59,12 +68,17 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
     )
     schema_agent = SchemaAgent(migration_writer=migration_writer)
 
+    query_logs_dir = _resolve_query_logs_dir(settings)
+    query_logger = JSONLQueryLogger(base_dir=query_logs_dir)
+
     return RunnerDependencies(
         sql_executor=executor,
         missing_data_flagger=flagger,
         scraper_agent=scraper_agent,
         update_agent=update_agent,
         schema_agent=schema_agent,
+        query_logger=query_logger,
+        scraper_logger=scraper_logger,
     )
 
 
@@ -128,6 +142,28 @@ def _resolve_migrations_dir(settings: Settings) -> Path:
         settings.paths.migrations_dir
         if settings.paths and settings.paths.migrations_dir
         else "schema/migrations"
+    )
+    path = Path(base).expanduser()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _resolve_query_logs_dir(settings: Settings) -> Path:
+    base = (
+        settings.paths.query_logs_dir
+        if settings.paths and settings.paths.query_logs_dir
+        else "logs/query"
+    )
+    path = Path(base).expanduser()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _resolve_scraper_logs_dir(settings: Settings) -> Path:
+    base = (
+        settings.paths.scraper_logs_dir
+        if settings.paths and settings.paths.scraper_logs_dir
+        else "logs/scraper"
     )
     path = Path(base).expanduser()
     path.mkdir(parents=True, exist_ok=True)

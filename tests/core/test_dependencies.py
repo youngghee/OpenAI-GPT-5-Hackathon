@@ -39,6 +39,8 @@ def test_build_dependencies_uses_in_memory_when_no_csv(base_settings: Settings) 
     assert isinstance(deps.scraper_agent.search_client, NullSearchClient)
     assert deps.update_agent is not None
     assert deps.schema_agent is not None
+    assert deps.query_logger is not None
+    assert deps.scraper_logger is not None
 
 
 def test_build_dependencies_uses_csv_path(
@@ -57,6 +59,8 @@ def test_build_dependencies_uses_csv_path(
     assert deps.scraper_agent is not None
     assert deps.update_agent is not None
     assert deps.schema_agent is not None
+    assert deps.query_logger is not None
+    assert deps.scraper_logger is not None
 
 
 def test_build_dependencies_uses_openai_search(

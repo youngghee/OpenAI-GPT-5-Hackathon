@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.agents.query_agent import MissingDataFlagger, QueryAgent, SQLExecutor
+from src.core.observability import QueryObservationSink
 
 
 @dataclass
@@ -28,10 +29,24 @@ class _FlaggerStub(MissingDataFlagger):
         self.calls.append({"ticket_id": ticket_id, "question": question, "facts": facts})
 
 
-def _make_agent(rows: list[dict[str, Any]]) -> tuple[QueryAgent, _SQLExecutorStub, _FlaggerStub]:
+@dataclass
+class _LoggerStub(QueryObservationSink):
+    events: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+
+    def log_event(self, ticket_id: str, event: str, payload: dict[str, Any]) -> None:  # type: ignore[override]
+        self.events.append((ticket_id, event, payload))
+
+
+def _make_agent(
+    rows: list[dict[str, Any]], logger: QueryObservationSink | None = None
+) -> tuple[QueryAgent, _SQLExecutorStub, _FlaggerStub]:
     executor = _SQLExecutorStub(rows=rows)
     flagger = _FlaggerStub()
-    return QueryAgent(sql_executor=executor, missing_data_flagger=flagger), executor, flagger
+    return (
+        QueryAgent(sql_executor=executor, missing_data_flagger=flagger, logger=logger),
+        executor,
+        flagger,
+    )
 
 
 def test_answer_question_returns_column_value() -> None:
@@ -93,3 +108,27 @@ def test_answer_question_flags_missing_value_when_column_empty() -> None:
 
     assert result["status"] == "missing_values"
     assert flagger.calls and "BUSINESS_NAME" in flagger.calls[0]["facts"]["missing_columns"]
+
+
+def test_answer_question_emits_observability_events() -> None:
+    rows = [
+        {
+            "BRIZO_ID": "abc",
+            "BUSINESS_NAME": "Cafe Example",
+            "LOCATION_CITY": "Florence",
+        }
+    ]
+    logger = _LoggerStub()
+    agent, _, _ = _make_agent(rows, logger=logger)
+
+    result = agent.answer_question(
+        ticket_id="T-obs", question="What is the business name?", record_id="abc"
+    )
+
+    assert result["status"] == "answered"
+    events = [event for _, event, _ in logger.events]
+    assert events[0] == "question_received"
+    assert "sql_executed" in events
+    assert "record_fetch_result" in events
+    assert "columns_inferred" in events
+    assert events.count("question_resolved") == 1

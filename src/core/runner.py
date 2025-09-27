@@ -83,6 +83,7 @@ class Runner:
             missing_data_flagger=self.dependencies.missing_data_flagger,
             primary_key_column=primary_key,
             table_name=table_name,
+            logger=self.dependencies.query_logger,
         )
 
         result = agent.answer_question(

@@ -15,6 +15,6 @@
 - Provide response provenance (table/column references, enriched facts consumed) so downstream agents understand how the answer was produced.
 
 ## Observability
-- Log prompt, SQL snippets, and decision trace to `logs/query/<ticket>.jsonl` (planned).
+- Emits lifecycle events (`question_received`, `sql_executed`, `columns_inferred`, etc.) to `logs/query/<ticket>.jsonl` for each ticket using the JSONL query logger.
 - Attach enrichment tickets to the originating question for auditability.
 - Capture derived SQL statements (e.g., `SELECT * FROM dataset WHERE BRIZO_ID = ...`) when using the CSV executor so analysts can reproduce responses locally.
