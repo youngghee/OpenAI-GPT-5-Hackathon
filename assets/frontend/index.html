@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Self-Enriching BI Chat</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Self-Enriching BI Assistant</h1>
+      <p>Ask questions about a CRM record and watch the agents collaborate.</p>
+    </header>
+    <main class="layout">
+      <section class="panel">
+        <h2>Session</h2>
+        <form id="session-form" class="form">
+          <label for="record-id">Record ID</label>
+          <input id="record-id" name="recordId" placeholder="Enter record id" required />
+          <div class="form-actions">
+            <button type="submit">Start Session</button>
+            <button type="button" id="resume-session" class="secondary">Resume</button>
+          </div>
+        </form>
+        <div class="session-details" id="session-details" hidden>
+          <dl>
+            <div>
+              <dt>Session</dt>
+              <dd id="session-id">—</dd>
+            </div>
+            <div>
+              <dt>Record</dt>
+              <dd id="session-record">—</dd>
+            </div>
+          </dl>
+          <div class="candidate-urls">
+            <h3>Candidate URLs</h3>
+            <ul id="candidate-urls"></ul>
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Record Context</h2>
+        <div id="record-context" class="key-value"></div>
+      </section>
+      <section class="panel chat-panel">
+        <h2>Conversation</h2>
+        <div id="conversation" class="conversation"></div>
+        <form id="question-form" class="form" hidden>
+          <label for="question-input">Ask a question</label>
+          <textarea
+            id="question-input"
+            name="question"
+            placeholder="e.g. How many employees?"
+            rows="3"
+            required
+          ></textarea>
+          <div class="form-actions">
+            <button type="submit">Send</button>
+          </div>
+        </form>
+      </section>
+    </main>
+    <template id="timeline-item-template">
+      <div class="timeline-item">
+        <span class="timeline-source"></span>
+        <span class="timeline-message"></span>
+      </div>
+    </template>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

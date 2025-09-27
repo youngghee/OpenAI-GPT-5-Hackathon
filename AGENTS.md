@@ -12,6 +12,7 @@ Default to GPT-5 Enterprise for reasoning and GPT-5 Codex Pro for tool execution
 ## Development Workflow
 Bootstrap with `python -m venv .venv` and `pip install -r requirements.txt`. Format via `black src tests` and lint with `ruff check src tests`. Run multi-agent simulations through `python -m src.core.runner --profile dev` and verify pipelines with `pytest --maxfail=1 --disable-warnings`. Use `make ci` before any pull request to chain lint, type, and test checks.
 - For conversational debugging, start the chat UX with `python -m src.core.chat --record <record_id>` and iterate interactively; the session id is generated automatically.
+- To demo the browser experience, run `python -m src.core.webapp --config configs/dev.yaml --port 8000` and open `http://localhost:8000`. Questions return a ticket id immediately; the UI listens on `GET /api/tickets/{ticket_id}/events` for real-time narration and renders the final payload once the background workflow reports completion.
 
 ## Coding Standards
 Target Python 3.11+, four-space indentation, exhaustive type hints, and docstrings on public entry points. Name agents by role (`query_agent.py`, `schema_agent.py`), keep functions under 40 lines, and extract branching logic into helper objects. Persist prompts as lowercase-hyphen Markdown files and version prompt changes alongside code updates.

@@ -64,6 +64,14 @@ flowchart TD
 - Inside the chat, type `/record <new_id>` or `/ticket <new_id>` to adjust context, and `/exit` when you are finished.
 - Each turn reuses the runner workflow, so updates and schema escalations behave identically to scripted simulations while providing conversational feedback in the terminal.
 
+## Web Frontend
+- Serve the browser experience with `python -m src.core.webapp --config configs/dev.yaml --host 0.0.0.0 --port 8000`. The FastAPI app mounts static assets from `assets/frontend/` and exposes REST endpoints under `/api/*`.
+- Start or resume a session by POSTing to `/api/session`; each response includes the record snapshot, distilled business context, and candidate URLs detected in the CSV row.
+- Submit questions with `/api/session/{session_id}/ask` to trigger the full agent workflow. Requests return immediately with a ticket id; the browser (or any client) can stream live narration over Server-Sent Events via `GET /api/tickets/{ticket_id}/events` while the background task runs.
+- Fetch the consolidated outcome—including answers and any schema proposals—once processing completes with `GET /api/tickets/{ticket_id}`. Each SSE `result` event mirrors the same payload so chat transcripts stay in sync.
+- The `assets/frontend/index.html` page uses a lightweight vanilla JS client (`app.js`) to render record context, conversation turns, and timeline updates. No build tooling is required—FastAPI serves the files directly.
+- Health checks live at `/api/health`; additional static resources (CSS, JS) are available under `/assets/` for embedding in other dashboards during prototyping.
+
 ## Next Steps for Implementation
 - Document agent token budgets, rate limits, and safety guidance in `docs/agents/` to align operations.
 - Validate end-to-end behaviour by running `python -m src.core.runner --profile dev` and `make ci` before deployment.

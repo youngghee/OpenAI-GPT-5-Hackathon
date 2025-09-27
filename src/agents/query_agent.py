@@ -17,6 +17,10 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.core.observability import QueryObservationSink
+from src.core.record_utils import (
+    build_record_context,
+    extract_candidate_urls,
+)
 from src.integrations.openai_agent_sdk import OpenAIAgentAdapter
 
 TOKEN_MIN_LENGTH = 3
@@ -28,17 +32,6 @@ DEFAULT_SYNONYMS: dict[str, set[str]] = {
     "LOCATION_STATE_CODE": {"state", "state code"},
     "LOCATION_COUNTRY": {"country"},
 }
-
-DEFAULT_CONTEXT_COLUMNS: tuple[str, ...] = (
-    "BUSINESS_NAME",
-    "ALTERNATE_NAME",
-    "PARENT_NAME",
-    "CHAIN_NAME",
-    "LOCATION_CITY",
-    "LOCATION_STATE_CODE",
-    "LOCATION_COUNTRY",
-)
-
 
 class SQLExecutor(Protocol):
     """Abstracts a SQL execution engine (e.g., Codex interpreter)."""
@@ -80,8 +73,8 @@ class QueryAgent:
         )
 
         row = self._fetch_record(ticket_id, record_id)
-        candidate_urls = self._extract_candidate_urls(row) if row else []
-        record_context = self._build_record_context(row)
+        candidate_urls = extract_candidate_urls(row, self.candidate_url_fields)
+        record_context = build_record_context(row, self.context_columns)
         if row is None:
             self._flag_missing(
                 ticket_id, question, {"reason": "record_not_found", "record_id": record_id}
@@ -362,79 +355,3 @@ class QueryAgent:
         except Exception:
             # Observability failures must not impact question handling.
             pass
-
-    def _extract_candidate_urls(self, row: dict[str, Any] | None) -> list[str]:
-        if not row:
-            return []
-        urls: list[str] = []
-        seen: set[str] = set()
-        columns = self.candidate_url_fields if self.candidate_url_fields else list(row.keys())
-        for column in columns:
-            value = row.get(column)
-            if not value:
-                continue
-            normalized = self._normalize_url(str(value))
-            if not normalized or normalized in seen:
-                continue
-            urls.append(normalized)
-            seen.add(normalized)
-        return urls
-
-    @staticmethod
-    def _looks_like_url(value: str) -> bool:
-        text = value.strip()
-        if not text:
-            return False
-        lowered = text.lower()
-        if lowered.startswith("http://") or lowered.startswith("https://"):
-            return True
-        if lowered.startswith("www."):
-            return True
-        if " " in lowered:
-            return False
-        if "." not in lowered:
-            return False
-        host_candidate = lowered.split("/")[0]
-        if (
-            host_candidate.count(".") >= 1
-            and not host_candidate.endswith(".")
-            and any(ch.isalpha() for ch in host_candidate)
-        ):
-            return True
-        return False
-
-    @staticmethod
-    def _normalize_url(value: str) -> str | None:
-        text = value.strip()
-        if not QueryAgent._looks_like_url(text):
-            return None
-        lowered = text.lower()
-        if lowered.startswith("http://") or lowered.startswith("https://"):
-            base = text
-        elif lowered.startswith("www."):
-            base = f"https://{text}"
-        else:
-            base = f"https://{text}"
-        return base.rstrip("/")
-
-    def _build_record_context(self, row: dict[str, Any] | None) -> dict[str, Any]:
-        if not row:
-            return {}
-        columns = self.context_columns or list(DEFAULT_CONTEXT_COLUMNS)
-        context: dict[str, Any] = {}
-        for column in columns:
-            value = row.get(column)
-            if value is None:
-                continue
-            if isinstance(value, str) and self._is_missing_text(value):
-                continue
-            context[column] = value
-        return context
-
-    @staticmethod
-    def _is_missing_text(value: str) -> bool:
-        stripped = value.strip()
-        if not stripped:
-            return True
-        lowered = stripped.lower()
-        return lowered in {"na", "n/a", "none", "null", "nan"}
