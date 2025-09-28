@@ -62,6 +62,7 @@ class QueryAgent:
     logger: QueryObservationSink | None = None
     candidate_url_fields: list[str] | None = None
     context_columns: list[str] | None = None
+    dataset_columns: list[str] | None = None
 
     def __post_init__(self) -> None:
         # Cache the last fetched row so follow-up stages can reuse it without
@@ -101,7 +102,13 @@ class QueryAgent:
             )
             return result
 
-        columns = self._infer_columns(question, row)
+        available_columns = self._list_available_columns(row)
+        columns = self._select_columns(
+            ticket_id=ticket_id,
+            question=question,
+            row=row,
+            available_columns=available_columns,
+        )
         self._log_event(
             ticket_id,
             "columns_inferred",
@@ -169,6 +176,9 @@ class QueryAgent:
             "facts": facts,
             "candidate_urls": candidate_urls,
         }
+        answer_origin = self._determine_answer_origin(facts)
+        if answer_origin:
+            result["answer_origin"] = answer_origin
         if record_context:
             result["record_context"] = record_context
         self._log_event(
@@ -310,7 +320,48 @@ class QueryAgent:
             f"SELECT * FROM {self.table_name} WHERE {self.primary_key_column} = '{safe_id}' LIMIT 1"
         )
 
-    def _infer_columns(self, question: str, row: dict[str, Any]) -> list[str]:
+    def _list_available_columns(self, row: dict[str, Any]) -> list[str]:
+        if self.dataset_columns:
+            # Preserve declared order while removing duplicates.
+            ordered: list[str] = []
+            seen: set[str] = set()
+            for column in self.dataset_columns:
+                key = column.upper()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered.append(column)
+            return ordered
+        return list(row.keys())
+
+    def _select_columns(
+        self,
+        *,
+        ticket_id: str,
+        question: str,
+        row: dict[str, Any],
+        available_columns: list[str],
+    ) -> list[str]:
+        lookup = self._build_column_lookup(set(available_columns))
+        chosen: list[str] = []
+
+        if self.llm_client is not None and available_columns:
+            chosen = self._select_columns_with_llm(
+                ticket_id=ticket_id,
+                question=question,
+                available_columns=available_columns,
+                lookup=lookup,
+            )
+
+        if not chosen:
+            chosen = self._infer_columns_from_question(question, row)
+
+        normalized = self._normalize_column_candidates(chosen, lookup)
+        if self.max_columns and len(normalized) > self.max_columns:
+            return normalized[: self.max_columns]
+        return normalized
+
+    def _infer_columns_from_question(self, question: str, row: dict[str, Any]) -> list[str]:
         normalized_question = self._normalize(question)
         if not normalized_question:
             return []
@@ -333,6 +384,34 @@ class QueryAgent:
             if len(unique_candidates) >= self.max_columns:
                 break
         return unique_candidates
+
+    def _select_columns_with_llm(
+        self,
+        *,
+        ticket_id: str,
+        question: str,
+        available_columns: list[str],
+        lookup: dict[str, str],
+    ) -> list[str]:
+        prompt = self._build_column_selection_prompt(question, available_columns)
+        try:
+            response = self.llm_client.generate(messages=prompt)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            self._log_event(
+                ticket_id,
+                "llm_error",
+                {"stage": "column_selection", "error": str(exc)},
+            )
+            return []
+
+        selected = self._extract_column_selection(response, lookup)
+        if selected:
+            self._log_event(
+                ticket_id,
+                "columns_selected_by_llm",
+                {"question": question, "columns": selected},
+            )
+        return selected
 
     def _resolve_facts(
         self,
@@ -415,6 +494,55 @@ class QueryAgent:
                 {"concepts": [fact.get("concept") for fact in facts]},
             )
         return facts
+
+    def _build_column_selection_prompt(
+        self, question: str, columns: Sequence[str]
+    ) -> list[dict[str, str]]:
+        limit_clause = (
+            f"Select up to {self.max_columns} column names that you need to inspect"
+            if self.max_columns
+            else "Select the column names that you need to inspect"
+        )
+        instructions = (
+            "You are a CRM analyst preparing to answer a stakeholder's question."
+            f" {limit_clause}. Choose only from the provided list of columns."
+            " Respond with JSON containing a key 'columns' whose value is an array of"
+            " column names (exact spellings from the list). You may optionally include a"
+            " 'notes' field with short rationale."
+        )
+        column_lines = "\n".join(f"- {name}" for name in columns)
+        user_content = (
+            f"Question: {question}\nAvailable columns:\n{column_lines}\n"
+            "Return the JSON object as described."
+        )
+        return [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": user_content},
+        ]
+
+    def _extract_column_selection(
+        self, response: Any, lookup: dict[str, str]
+    ) -> list[str]:
+        for payload in self._iter_json_payloads(response):
+            if not isinstance(payload, dict):
+                continue
+
+            raw_columns = payload.get("columns")
+            if isinstance(raw_columns, list):
+                candidates = [str(item) for item in raw_columns if item is not None]
+                normalized = self._normalize_column_candidates(candidates, lookup)
+                if normalized:
+                    return normalized
+
+            # Allow alternate key 'column_names' for robustness.
+            fallback = payload.get("column_names")
+            if isinstance(fallback, list):
+                candidates = [str(item) for item in fallback if item is not None]
+                normalized = self._normalize_column_candidates(candidates, lookup)
+                if normalized:
+                    return normalized
+
+        return []
 
     def _build_prompt(self, question: str, row: dict[str, Any]) -> list[dict[str, str]]:
         context = json.dumps(row, ensure_ascii=False)
@@ -823,6 +951,23 @@ class QueryAgent:
         if isinstance(value, (list, tuple, set, dict)):
             return len(value) > 0
         return True
+
+    @staticmethod
+    def _determine_answer_origin(facts: Sequence[dict[str, Any]]) -> str | None:
+        origins = {
+            fact.get("origin")
+            for fact in facts
+            if isinstance(fact, dict) and fact.get("origin")
+        }
+        if not origins:
+            return None
+        if origins == {"dataset"}:
+            return "dataset"
+        if origins == {"scraper"}:
+            return "scraper"
+        if origins == {"llm"}:
+            return "llm"
+        return "mixed"
 
     def _column_synonyms(self, column: str) -> set[str]:
         base = DEFAULT_SYNONYMS.get(column.upper(), set())

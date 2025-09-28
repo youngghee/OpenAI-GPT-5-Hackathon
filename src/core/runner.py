@@ -135,6 +135,7 @@ def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> 
         table_name=table_name,
         logger=dependencies.query_logger,
         candidate_url_fields=dependencies.candidate_url_fields,
+        dataset_columns=dependencies.dataset_columns,
     )
 
     result = agent.answer_question(
@@ -156,7 +157,18 @@ def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> 
     enrichment_payload = Runner._resolve_enrichment_payload(result, scenario)
     schema_proposal: dict[str, Any] | None = None
 
-    if enrichment_payload:
+    answer_origin = result.get("answer_origin")
+    same_as_answer = (
+        isinstance(enrichment_payload, list)
+        and enrichment_payload == result.get("facts")
+    )
+    skip_update = (
+        result.get("status") == "answered"
+        and answer_origin == "dataset"
+        and same_as_answer
+    )
+
+    if enrichment_payload and not skip_update:
         update_summary = dependencies.update_agent.apply_enrichment(
             ticket_id=ticket_id,
             record_id=record_id,
@@ -170,6 +182,8 @@ def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> 
                 ticket_id=ticket_id,
                 evidence_summary=escalated,
             )
+    elif skip_update:
+        result.setdefault("update", {"status": "skipped", "reason": "dataset_only_answer"})
 
     if schema_proposal:
         result["schema_proposal"] = schema_proposal

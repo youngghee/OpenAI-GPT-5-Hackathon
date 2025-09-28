@@ -40,7 +40,10 @@ class _LoggerStub(QueryObservationSink):
 
 
 def _make_agent(
-    rows: list[dict[str, Any]], logger: QueryObservationSink | None = None, llm_client: Any | None = None
+    rows: list[dict[str, Any]],
+    logger: QueryObservationSink | None = None,
+    llm_client: Any | None = None,
+    dataset_columns: list[str] | None = None,
 ) -> tuple[QueryAgent, _SQLExecutorStub, _FlaggerStub]:
     executor = _SQLExecutorStub(rows=rows)
     flagger = _FlaggerStub()
@@ -50,6 +53,7 @@ def _make_agent(
             missing_data_flagger=flagger,
             llm_client=llm_client,
             logger=logger,
+            dataset_columns=dataset_columns,
         ),
         executor,
         flagger,
@@ -76,6 +80,7 @@ def test_answer_question_returns_column_value() -> None:
     first_fact = facts[0]
     assert first_fact["concept"] == "business_name"
     assert first_fact["value"] == "Cafe Example"
+    assert result["answer_origin"] == "dataset"
     assert executor.statements == ["SELECT * FROM dataset WHERE BRIZO_ID = 'abc' LIMIT 1"]
     assert flagger.calls == []
 
@@ -165,10 +170,18 @@ class _LLMResponse:
 class _LLMClientStub:
     def __init__(
         self,
-        response_text: str = '{"status": "answered", "facts": [{"concept": "business_name", "value": "Example LLC"}]}'
+        *,
+        responses: list[str] | None = None,
+        response_text: str | None = None,
     ) -> None:
+        default_text = (
+            response_text
+            if response_text is not None
+            else '{"status": "answered", "facts": [{"concept": "business_name", "value": "Example LLC"}]}'
+        )
         self.calls: list[dict[str, Any]] = []
-        self.response_text = response_text
+        self._responses: list[str] = list(responses) if responses is not None else []
+        self._default_response: str = default_text
 
     def generate(
         self,
@@ -179,7 +192,11 @@ class _LLMClientStub:
         response_format: dict[str, Any] | None = None,
     ) -> Any:  # type: ignore[override]
         self.calls.append({"messages": messages})
-        return _LLMResponse(self.response_text)
+        if self._responses:
+            text = self._responses.pop(0)
+        else:
+            text = self._default_response
+        return _LLMResponse(text)
 
 
 def test_query_agent_uses_llm_when_columns_missing() -> None:
@@ -189,7 +206,12 @@ def test_query_agent_uses_llm_when_columns_missing() -> None:
             "BUSINESS_NAME": "",
         }
     ]
-    llm = _LLMClientStub()
+    llm = _LLMClientStub(
+        responses=[
+            '{"columns": ["BUSINESS_NAME"]}',
+            '{"status": "answered", "facts": [{"concept": "business_name", "value": "Example LLC"}]}',
+        ]
+    )
     agent, _, flagger = _make_agent(rows, llm_client=llm)
 
     result = agent.answer_question(
@@ -200,7 +222,41 @@ def test_query_agent_uses_llm_when_columns_missing() -> None:
     facts = result.get("facts")
     assert isinstance(facts, list) and facts[0]["value"] == "Example LLC"
     assert not flagger.calls
-    assert llm.calls
+    assert len(llm.calls) == 2
+    selection_call = llm.calls[0]
+    user_message = selection_call["messages"][1]["content"]
+    assert "Available columns" in user_message
+    assert "BUSINESS_NAME" in user_message
+    assert result["answer_origin"] == "llm"
+
+
+def test_query_agent_feeds_dataset_column_catalog_to_llm() -> None:
+    rows = [
+        {
+            "BRIZO_ID": "abc",
+            "BUSINESS_NAME": "Cafe Example",
+        }
+    ]
+    dataset_columns = ["BRIZO_ID", "BUSINESS_NAME", "EMPLOYEE_COUNT"]
+    llm = _LLMClientStub(responses=['{"columns": ["BUSINESS_NAME"]}'])
+    agent, _, flagger = _make_agent(
+        rows,
+        llm_client=llm,
+        dataset_columns=dataset_columns,
+    )
+
+    result = agent.answer_question(
+        ticket_id="T-columns",
+        question="What is the business name?",
+        record_id="abc",
+    )
+
+    assert result["status"] == "answered"
+    assert not flagger.calls
+    assert len(llm.calls) == 1
+    selection_user = llm.calls[0]["messages"][1]["content"]
+    assert "EMPLOYEE_COUNT" in selection_user
+    assert "BUSINESS_NAME" in selection_user
 
 
 def test_query_agent_incorporates_scraper_findings_with_llm() -> None:

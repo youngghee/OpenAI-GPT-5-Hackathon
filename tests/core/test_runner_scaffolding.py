@@ -160,10 +160,12 @@ def test_runner_executes_scenarios() -> None:
     assert result["status"] == "answered"
     facts = result["facts"]
     assert isinstance(facts, list) and facts[0]["value"] == "Cafe"
-    assert result["update"]["status"] == "simulated"
+    assert result["answer_origin"] == "dataset"
+    assert result["update"]["status"] == "skipped"
+    assert result["update"]["reason"] == "dataset_only_answer"
     assert not flagger.calls
     assert not scraper.calls
-    assert updater.summaries and updater.summaries[0]["facts"][0]["value"] == "Cafe"
+    assert updater.summaries == []
     assert not schema_agent.calls
 
 
@@ -378,6 +380,8 @@ def test_runner_incorporates_scraper_follow_up() -> None:
     assert result["facts"][0]["value"] == 1200
     assert result.get("answer_origin") == "scraper"
     assert result.get("previous_status") == "unknown_question"
+    assert result.get("update", {}).get("status") != "skipped"
+    assert updater.summaries and updater.summaries[0]["facts"][0]["value"] == 1200
     assert result.get("fact_sources") == {"employee_count": "https://example.com/report"}
     assert result["scraper_findings"] == 1
     assert updater.summaries and updater.summaries[0]["facts"][0]["value"] == 1200

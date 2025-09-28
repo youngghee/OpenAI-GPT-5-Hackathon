@@ -43,6 +43,7 @@ class RunnerDependencies:
     scraper_logger: ScraperObservationSink | None = None
     gpt_client: OpenAIAgentAdapter | None = None
     candidate_url_fields: list[str] | None = None
+    dataset_columns: list[str] | None = None
 
 
 def build_dependencies(settings: Settings) -> RunnerDependencies:
@@ -91,6 +92,7 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
     response_client = _build_response_client(settings)
     agent_client = _build_agent_client(settings, response_client)
     candidate_url_fields = _detect_candidate_url_fields(executor)
+    dataset_columns = _list_dataset_columns(executor)
 
     if agent_client is not None:
         scraper_agent.llm_client = agent_client
@@ -107,6 +109,7 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
         scraper_logger=scraper_logger,
         gpt_client=agent_client,
         candidate_url_fields=candidate_url_fields,
+        dataset_columns=dataset_columns,
     )
 
 
@@ -270,3 +273,12 @@ def _detect_dataset_columns(executor: SQLExecutor) -> set[str]:
     if isinstance(executor, CsvSQLExecutor):
         return {column.strip().upper() for column in executor.columns if column.strip()}
     return set()
+
+
+def _list_dataset_columns(executor: SQLExecutor) -> list[str]:
+    if isinstance(executor, CsvSQLExecutor):
+        return list(executor.columns)
+    columns = getattr(executor, "columns", None)
+    if isinstance(columns, list):
+        return list(columns)
+    return []

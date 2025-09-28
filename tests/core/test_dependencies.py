@@ -45,6 +45,7 @@ def test_build_dependencies_uses_in_memory_when_no_csv(base_settings: Settings) 
     assert deps.scraper_logger is not None
     assert deps.gpt_client is None
     assert deps.candidate_url_fields == []
+    assert deps.dataset_columns == []
 
 
 def test_build_dependencies_uses_csv_path(
@@ -68,6 +69,7 @@ def test_build_dependencies_uses_csv_path(
     assert deps.scraper_logger is not None
     assert deps.gpt_client is None
     assert deps.candidate_url_fields == []
+    assert deps.dataset_columns == ["id"]
 
 
 def test_build_dependencies_uses_openai_search(
@@ -109,6 +111,7 @@ def test_build_dependencies_uses_openai_search(
     assert isinstance(deps.scraper_agent.search_client, _SearchStub)
     assert created_clients and created_clients[0].kwargs["max_results"] == expected_max_results
     assert deps.candidate_url_fields == []
+    assert deps.dataset_columns == []
 
 
 def test_candidate_url_fields_detected(
@@ -128,3 +131,4 @@ def test_candidate_url_fields_detected(
     deps = build_dependencies(base_settings)
 
     assert set(deps.candidate_url_fields or []) == {"LINK", "YELP_LINK", "BRIZO_WEBSITE"}
+    assert deps.dataset_columns == ["BRIZO_ID", "LINK", "YELP_LINK", "BRIZO_WEBSITE", "NOTES"]
