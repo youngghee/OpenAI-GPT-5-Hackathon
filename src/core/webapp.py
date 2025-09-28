@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,9 @@ from src.core.dependencies import RunnerDependencies, build_dependencies
 from src.core.record_utils import build_record_context, extract_candidate_urls
 from src.core.runner import run_scenario
 from src.core.chat import describe_query_event, describe_scraper_event
+
+
+LOGGER = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = REPO_ROOT / "assets" / "frontend"
@@ -364,6 +368,7 @@ class TimelineSchemaAgent:
 
 
 def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
+    LOGGER.info("Initialising web application with config '%s'", config_path)
     settings = load_settings(config_path)
     dataset_service = DatasetService(settings)
     session_manager = SessionManager()
@@ -395,6 +400,7 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
 
     @app.get("/api/dataset/columns", response_model=DatasetColumnsResponse)
     def dataset_columns() -> DatasetColumnsResponse:
+        LOGGER.debug("Dataset columns requested")
         return DatasetColumnsResponse(
             columns=dataset_service.list_columns(),
             primary_key=dataset_service.default_primary_key,
@@ -406,6 +412,7 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
         offset: int = Query(0, ge=0),
         limit: int = Query(25, ge=1, le=100),
     ) -> DatasetRowsResponse:
+        LOGGER.debug("Dataset rows requested offset=%s limit=%s", offset, limit)
         total = dataset_service.row_count()
         if offset >= total:
             rows: list[dict[str, Any]] = []
@@ -425,6 +432,11 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
 
     @app.post("/api/session", response_model=SessionStartResponse)
     def start_session(payload: SessionStartRequest) -> SessionStartResponse:
+        LOGGER.info(
+            "Starting session request for record_id=%s table=%s",
+            payload.record_id,
+            payload.table_name or dataset_service.table_name,
+        )
         primary_key = payload.primary_key_column or dataset_service.default_primary_key
         table_name = payload.table_name or dataset_service.table_name
         record = dataset_service.fetch_record(
@@ -433,12 +445,23 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
             table_name=table_name,
         )
         if record is None:
+            LOGGER.warning(
+                "Session start failed: record_id=%s not found in table=%s",
+                payload.record_id,
+                table_name,
+            )
             raise HTTPException(status_code=404, detail="Record not found")
 
         session_id = session_manager.create(
             record_id=payload.record_id,
             table_name=table_name,
             primary_key=primary_key,
+        )
+        LOGGER.info(
+            "Session %s created for record_id=%s table=%s",
+            session_id,
+            payload.record_id,
+            table_name,
         )
         context = build_record_context(record)
         candidate_urls = extract_candidate_urls(record)
@@ -456,6 +479,7 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
     def resume_session(session_id: str) -> SessionStartResponse:
         state = session_manager.get(session_id)
         if state is None:
+            LOGGER.warning("Resume session failed: session_id=%s not found", session_id)
             raise HTTPException(status_code=404, detail="Session not found")
         record = dataset_service.fetch_record(
             record_id=state.record_id,
@@ -463,6 +487,11 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
             table_name=state.table_name,
         )
         if record is None:
+            LOGGER.warning(
+                "Resume session failed: record_id=%s missing for session_id=%s",
+                state.record_id,
+                session_id,
+            )
             raise HTTPException(status_code=404, detail="Record not found")
         context = build_record_context(record)
         candidate_urls = extract_candidate_urls(record)
@@ -486,11 +515,23 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
         payload: AskQuestionRequest,
         background_tasks: BackgroundTasks,
     ) -> AskQuestionAcceptedResponse:
+        LOGGER.info(
+            "Received question for session_id=%s question=%s",
+            session_id,
+            _truncate_for_log(payload.question),
+        )
         state = session_manager.get(session_id)
         if state is None:
+            LOGGER.warning("Ask question failed: session_id=%s not found", session_id)
             raise HTTPException(status_code=404, detail="Session not found")
 
         ticket_id = session_manager.reserve_ticket(session_id)
+        LOGGER.info(
+            "Dispatching ticket %s for record_id=%s question=%s",
+            ticket_id,
+            state.record_id,
+            _truncate_for_log(payload.question),
+        )
         scenario = {
             "ticket_id": ticket_id,
             "question": payload.question,
@@ -517,8 +558,14 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
     def get_ticket(ticket_id: str) -> TicketResultResponse:
         payload = result_store.get(ticket_id)
         if payload is None:
+            LOGGER.debug("Ticket %s requested but result not ready", ticket_id)
             raise HTTPException(status_code=404, detail="Result not ready")
         timeline_entries = [TimelineEntry(**entry) for entry in payload["timeline"]]
+        LOGGER.info(
+            "Ticket %s retrieved with status=%s",
+            ticket_id,
+            payload["result"].get("status"),
+        )
         return TicketResultResponse(
             ticket_id=ticket_id,
             result=payload["result"],
@@ -527,6 +574,8 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
 
     @app.get("/api/tickets/{ticket_id}/events")
     async def stream_ticket(ticket_id: str) -> StreamingResponse:
+        LOGGER.debug("Client subscribed to ticket %s events", ticket_id)
+
         async def event_generator() -> AsyncIterator[str]:
             queue = await broker.subscribe(ticket_id)
             try:
@@ -543,6 +592,23 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
     return app
 
 
+def _configure_logging() -> None:
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+    )
+
+
+def _truncate_for_log(value: str, limit: int = 200) -> str:
+    text = value.strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
 def _process_question(
     settings: Settings,
     scenario: dict[str, Any],
@@ -550,18 +616,31 @@ def _process_question(
     broker: RealtimeBroker,
     result_store: ResultStore,
 ) -> None:
+    LOGGER.info(
+        "Processing ticket %s for record_id=%s question=%s",
+        ticket_id,
+        scenario.get("record_id"),
+        _truncate_for_log(str(scenario.get("question", ""))),
+    )
     dependencies = build_dependencies(settings)
     timeline = TimelineRecorder(events=[], broker=broker, ticket_id=ticket_id)
     attach_timeline(dependencies, timeline)
     try:
         result = run_scenario(dependencies, scenario)
     except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.exception("Ticket %s failed during processing", ticket_id)
         timeline.add("system", "Question processing failed; see logs for details.")
         result = {
             "ticket_id": ticket_id,
             "status": "error",
             "error": str(exc),
         }
+    else:
+        LOGGER.info(
+            "Ticket %s completed with status=%s",
+            ticket_id,
+            result.get("status"),
+        )
 
     payload = {
         "result": result,
@@ -569,6 +648,7 @@ def _process_question(
     }
     result_store.set(ticket_id, payload)
     broker.publish_result(ticket_id, result, timeline.events)
+    LOGGER.debug("Ticket %s result persisted and published", ticket_id)
 
 
 def _format_sse(event_type: str, data: str) -> str:
@@ -607,6 +687,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000, help="Port to bind the server")
     args = parser.parse_args()
 
+    _configure_logging()
     app = create_app(config_path=args.config)
 
     try:
@@ -614,6 +695,7 @@ def main() -> None:
     except ImportError as exc:  # pragma: no cover - defensive
         raise SystemExit("uvicorn must be installed to run the web frontend") from exc
 
+    LOGGER.info("Starting uvicorn on %s:%s", args.host, args.port)
     uvicorn.run(app, host=args.host, port=args.port)
 
 
