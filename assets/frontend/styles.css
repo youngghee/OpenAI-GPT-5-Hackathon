@@ -201,6 +201,10 @@ button.secondary {
   color: #1f2937;
 }
 
+.hidden {
+  display: none !important;
+}
+
 button.small {
   padding: 0.4rem 0.75rem;
   font-size: 0.85rem;
@@ -423,6 +427,136 @@ button.secondary:hover:not(:disabled) {
   flex: 1;
 }
 
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.modal-dialog {
+  position: relative;
+  background: #ffffff;
+  border-radius: 16px;
+  width: min(640px, calc(100% - 2rem));
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 28px 60px rgba(15, 23, 42, 0.25);
+}
+
+.modal-header,
+.modal-footer {
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.modal-body {
+  padding: 0 1.5rem 1.5rem;
+  overflow-y: auto;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1 1 auto;
+}
+
+.modal-body p {
+  margin: 0;
+}
+
+.modal-body pre {
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  overflow: auto;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  max-height: 40vh;
+  white-space: pre;
+}
+
+.icon-button {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.icon-button:hover,
+.icon-button:focus {
+  background: #e2e8f0;
+  color: #1f2937;
+}
+
+.schema-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem 1rem;
+}
+
+.schema-meta p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #1f2937;
+}
+
+.schema-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.schema-table th,
+.schema-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.schema-table th {
+  background: #f1f5f9;
+  font-weight: 600;
+}
+
+.schema-proposal-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.schema-proposal-summary p {
+  margin: 0;
+  color: #1f2937;
+}
+
 @media (max-width: 720px) {
   body {
     padding: 0 1rem 1.5rem;
@@ -454,4 +588,10 @@ button.secondary:hover:not(:disabled) {
   .conversation {
     max-height: 320px;
   }
+}
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
 }

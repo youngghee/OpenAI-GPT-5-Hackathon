@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from src.core.config import Settings, load_settings
 from src.core.dependencies import RunnerDependencies, build_dependencies
 from src.core.record_utils import build_record_context, extract_candidate_urls
+from src.core.migrations import FileMigrationWriter
 from src.core.runner import run_scenario
 from src.core.chat import describe_query_event, describe_scraper_event
 
@@ -38,6 +39,37 @@ class SessionState:
     table_name: str
     primary_key: str
     counter: int = 0
+
+
+def _resolve_migrations_dir(settings: Settings) -> Path:
+    base = None
+    if getattr(settings, "paths", None) is not None:
+        base = settings.paths.migrations_dir
+    target = Path(base or "schema/migrations").expanduser()
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+class SchemaColumnPayload(BaseModel):
+    name: str
+    data_type: str
+    nullable: bool | None = True
+    description: str | None = None
+
+
+class ApplySchemaRequest(BaseModel):
+    ticket_id: str = Field(..., min_length=1)
+    columns: list[SchemaColumnPayload] = Field(default_factory=list)
+    migration_statements: list[str] = Field(default_factory=list)
+    table_name: str | None = None
+    notes: str | None = None
+    migration_name: str | None = None
+
+
+class ApplySchemaResponse(BaseModel):
+    status: Literal["applied"]
+    migration_path: str
+    statements_written: int
 
 
 class ResultStore:
@@ -380,6 +412,8 @@ def create_app(
     settings = load_settings(config_path)
     dataset_service = DatasetService(settings)
     session_manager = SessionManager()
+    migrations_dir = _resolve_migrations_dir(settings)
+    migration_writer = FileMigrationWriter(base_dir=migrations_dir)
 
     app = FastAPI(title="Self-Enriching BI Frontend", version="0.1.0")
     broker = RealtimeBroker()
@@ -390,6 +424,7 @@ def create_app(
     app.state.broker = broker
     app.state.result_store = result_store
     app.state.debug_events = debug_events
+    app.state.migration_writer = migration_writer
     app.add_event_handler("startup", broker.startup)
 
     if FRONTEND_DIR.exists():
@@ -437,6 +472,52 @@ def create_app(
             has_more=has_more,
             primary_key=dataset_service.default_primary_key,
             table_name=dataset_service.table_name,
+        )
+
+    @app.post("/api/schema/apply", response_model=ApplySchemaResponse)
+    def apply_schema_changes(payload: ApplySchemaRequest) -> ApplySchemaResponse:
+        LOGGER.info("Schema apply requested for ticket_id=%s", payload.ticket_id)
+        columns = payload.columns or []
+        statements = [stmt for stmt in payload.migration_statements if stmt and stmt.strip()]
+
+        if not statements and columns:
+            target_table = payload.table_name or dataset_service.table_name
+            for column in columns:
+                if not column.name:
+                    continue
+                data_type = column.data_type or "TEXT"
+                clause = f'ALTER TABLE {target_table} ADD COLUMN IF NOT EXISTS "{column.name}" {data_type}'
+                if column.nullable is False:
+                    clause += " NOT NULL"
+                clause += ";"
+                statements.append(clause)
+
+        if not statements:
+            LOGGER.warning("Schema apply rejected: no statements for ticket_id=%s", payload.ticket_id)
+            raise HTTPException(status_code=400, detail="No schema changes supplied")
+
+        migration_name = payload.migration_name or f"ticket_{payload.ticket_id.lower()}_ui"
+
+        try:
+            migration_path = migration_writer.write_migration(
+                name=migration_name,
+                statements=statements,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.exception("Failed to write migration for ticket_id=%s", payload.ticket_id)
+            raise HTTPException(status_code=500, detail="Failed to persist migration") from exc
+
+        LOGGER.info(
+            "Schema migration applied ticket_id=%s path=%s statements=%s",
+            payload.ticket_id,
+            migration_path,
+            len(statements),
+        )
+
+        return ApplySchemaResponse(
+            status="applied",
+            migration_path=migration_path,
+            statements_written=len(statements),
         )
 
     @app.post("/api/session", response_model=SessionStartResponse)

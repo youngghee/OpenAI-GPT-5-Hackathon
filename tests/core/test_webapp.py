@@ -176,3 +176,33 @@ def test_debug_events_emit_logs(
 
     logged_messages = "\n".join(record.message for record in caplog.records)
     assert "Timeline[" in logged_messages
+
+
+def test_apply_schema_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_dataset: Path) -> None:
+    config_path = _write_config(tmp_path)
+    monkeypatch.setenv("CSV_DATA_PATH", str(sample_dataset))
+
+    app = create_app(config_path=str(config_path))
+    with TestClient(app) as client:
+        payload = {
+            "ticket_id": "T-schema",
+            "columns": [
+                {
+                    "name": "employee_count",
+                    "data_type": "INTEGER",
+                    "nullable": False,
+                    "description": "Total employees",
+                }
+            ],
+            "migration_statements": [
+                "ALTER TABLE dataset ADD COLUMN employee_count INTEGER NOT NULL"
+            ],
+        }
+        response = client.post("/api/schema/apply", json=payload)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "applied"
+        path = Path(body["migration_path"])
+        assert path.exists()
+        content = path.read_text(encoding="utf-8")
+        assert "employee_count" in content

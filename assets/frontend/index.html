@@ -108,6 +108,30 @@
         </div>
       </section>
     </main>
+    <div id="schema-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-action="close"></div>
+      <div
+        class="modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="schema-modal-title"
+        tabindex="-1"
+      >
+        <header class="modal-header">
+          <h3 id="schema-modal-title">Schema Proposal</h3>
+          <button type="button" class="icon-button" data-action="close" aria-label="Close schema proposal">
+            ×
+          </button>
+        </header>
+        <div class="modal-body" id="schema-modal-body"></div>
+        <footer class="modal-footer">
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-action="close">Close</button>
+            <button type="button" class="primary" data-action="apply-schema">Apply schema changes</button>
+          </div>
+        </footer>
+      </div>
+    </div>
     <template id="timeline-item-template">
       <div class="timeline-item">
         <span class="timeline-source"></span>

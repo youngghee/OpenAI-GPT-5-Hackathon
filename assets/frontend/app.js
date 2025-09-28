@@ -23,6 +23,7 @@ const questionForm = document.getElementById("question-form");
 const questionInput = document.getElementById("question-input");
 const conversationElement = document.getElementById("conversation");
 const timelineTemplate = document.getElementById("timeline-item-template");
+const schemaModal = createSchemaModal();
 
 const state = {
   dataset: {
@@ -434,6 +435,8 @@ function renderResult(result) {
   heading.style.margin = "0";
   container.appendChild(heading);
 
+  schemaModal.clear();
+
   if (Array.isArray(result.facts) && result.facts.length) {
     const list = document.createElement("ul");
     list.className = "facts";
@@ -501,14 +504,34 @@ function renderResult(result) {
     }
   }
 
-  if (result.schema_proposal && Array.isArray(result.schema_proposal.columns)) {
-    const list = document.createElement("ul");
-    result.schema_proposal.columns.forEach((column) => {
-      const item = document.createElement("li");
-      item.textContent = `${column.name} · ${column.data_type}`;
-      list.appendChild(item);
-    });
-    container.appendChild(withLabel("Schema proposal", list));
+  if (
+    result.schema_proposal &&
+    Array.isArray(result.schema_proposal.columns) &&
+    result.schema_proposal.columns.length
+  ) {
+    schemaModal.setProposal(result.schema_proposal);
+    const wrapper = document.createElement("div");
+    wrapper.className = "schema-proposal-summary";
+
+    const summary = document.createElement("p");
+    const columnCount = result.schema_proposal.columns.length;
+    summary.textContent = `${columnCount} proposed column${columnCount === 1 ? "" : "s"} available.`;
+    wrapper.appendChild(summary);
+
+    if (result.schema_proposal.migration_path) {
+      const path = document.createElement("p");
+      path.textContent = `Migration path: ${result.schema_proposal.migration_path}`;
+      wrapper.appendChild(path);
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = "View schema proposal";
+    button.addEventListener("click", () => schemaModal.open());
+    wrapper.appendChild(button);
+
+    container.appendChild(withLabel("Schema proposal", wrapper));
   }
 
   return container;
@@ -585,4 +608,230 @@ function withLabel(label, element) {
   wrapper.appendChild(heading);
   wrapper.appendChild(element);
   return wrapper;
+}
+
+function createSchemaModal() {
+  const root = document.getElementById("schema-modal");
+  if (!root) {
+    return {
+      setProposal() {},
+      open() {},
+      clear() {},
+    };
+  }
+
+  const dialog = root.querySelector(".modal-dialog");
+  const body = root.querySelector("#schema-modal-body");
+  const backdrop = root.querySelector(".modal-backdrop");
+  const closeButtons = root.querySelectorAll('[data-action="close"]');
+  const applyButton = root.querySelector('[data-action="apply-schema"]');
+  let currentProposal = null;
+  const defaultApplyLabel = applyButton ? applyButton.textContent : "Apply schema changes";
+
+  const close = () => {
+    root.classList.add("hidden");
+    root.setAttribute("aria-hidden", "true");
+    root.removeAttribute("data-open");
+    document.body.style.removeProperty("overflow");
+  };
+
+  const focusDialog = () => {
+    if (!dialog) return;
+    const focusable = dialog.querySelector(
+      'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const target = focusable || dialog;
+    if (typeof target.focus === "function") {
+      target.focus({ preventScroll: true });
+    }
+  };
+
+  const setApplyState = (loading) => {
+    if (!applyButton) return;
+    applyButton.disabled = loading;
+    applyButton.textContent = loading ? "Applying…" : defaultApplyLabel;
+  };
+
+  const renderProposal = () => {
+    if (!currentProposal) {
+      body.innerHTML = "";
+      return;
+    }
+
+    body.innerHTML = "";
+
+    const meta = document.createElement("div");
+    meta.className = "schema-meta";
+
+    const appendMeta = (label, value) => {
+      if (value === undefined || value === null || value === "") return;
+      const paragraph = document.createElement("p");
+      const strong = document.createElement("strong");
+      strong.textContent = label;
+      paragraph.appendChild(strong);
+      paragraph.appendChild(document.createElement("br"));
+      const span = document.createElement("span");
+      span.textContent = String(value);
+      paragraph.appendChild(span);
+      meta.appendChild(paragraph);
+    };
+
+    appendMeta("Ticket", currentProposal.ticket_id);
+    appendMeta("Migration Path", currentProposal.migration_path);
+    if (typeof currentProposal.notes === "string" && currentProposal.notes.trim()) {
+      appendMeta("Notes", currentProposal.notes.trim());
+    }
+
+    if (meta.childElementCount) {
+      body.appendChild(meta);
+    }
+
+    const columns = Array.isArray(currentProposal.columns) ? currentProposal.columns : [];
+    if (columns.length) {
+      const table = document.createElement("table");
+      table.className = "schema-table";
+
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      ["Column", "Type", "Nullable", "Description"].forEach((text) => {
+        const th = document.createElement("th");
+        th.textContent = text;
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      columns.forEach((column) => {
+        const row = document.createElement("tr");
+        const nameCell = document.createElement("td");
+        nameCell.textContent = column.name || "—";
+        row.appendChild(nameCell);
+
+        const typeCell = document.createElement("td");
+        typeCell.textContent = column.data_type || column.type || "—";
+        row.appendChild(typeCell);
+
+        const nullableCell = document.createElement("td");
+        const nullable = typeof column.nullable === "boolean" ? column.nullable : true;
+        nullableCell.textContent = nullable ? "Yes" : "No";
+        row.appendChild(nullableCell);
+
+        const descriptionCell = document.createElement("td");
+        descriptionCell.textContent = column.description || "—";
+        row.appendChild(descriptionCell);
+
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(tbody);
+      body.appendChild(table);
+    }
+
+    if (Array.isArray(currentProposal.migration_statements) && currentProposal.migration_statements.length) {
+      const pre = document.createElement("pre");
+      pre.textContent = currentProposal.migration_statements.join("\n");
+      body.appendChild(pre);
+    }
+  };
+
+  const setProposal = (proposal) => {
+    if (
+      !proposal ||
+      !Array.isArray(proposal.columns) ||
+      proposal.columns.length === 0
+    ) {
+      currentProposal = null;
+      if (!root.classList.contains("hidden")) {
+        close();
+      }
+      body.innerHTML = "";
+      setApplyState(false);
+      return;
+    }
+
+    currentProposal = {
+      ...proposal,
+    };
+    setApplyState(false);
+    renderProposal();
+  };
+
+  const open = () => {
+    if (!currentProposal) return;
+    renderProposal();
+    root.classList.remove("hidden");
+    root.setAttribute("aria-hidden", "false");
+    root.setAttribute("data-open", "true");
+    document.body.style.overflow = "hidden";
+    focusDialog();
+  };
+
+  const handleKeydown = (event) => {
+    if (event.key === "Escape" && !root.classList.contains("hidden")) {
+      event.preventDefault();
+      close();
+    }
+  };
+
+  const applySchema = async () => {
+    if (!currentProposal || !applyButton) return;
+    const payload = {
+      ticket_id: currentProposal.ticket_id || state.session.id || "manual",
+      columns: currentProposal.columns || [],
+      migration_statements: currentProposal.migration_statements || [],
+      table_name: currentProposal.table_name || state.dataset.tableName,
+      notes: currentProposal.notes || null,
+      migration_name: currentProposal.migration_name || undefined,
+    };
+
+    setApplyState(true);
+    try {
+      const response = await fetch("/api/schema/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "Failed to apply schema");
+      }
+      const result = await response.json();
+      const path = result.migration_path;
+      addSystemMessage(
+        path
+          ? `Schema migration written to ${path}.`
+          : "Schema changes applied."
+      );
+      close();
+    } catch (error) {
+      console.error("Failed to apply schema proposal", error);
+      const message = error instanceof Error ? error.message : "Unexpected error applying schema";
+      addSystemMessage(`Schema application failed: ${message}`);
+      alert(message);
+    } finally {
+      setApplyState(false);
+    }
+  };
+
+  document.addEventListener("keydown", handleKeydown);
+  if (backdrop) {
+    backdrop.addEventListener("click", close);
+  }
+  closeButtons.forEach((button) => {
+    button.addEventListener("click", close);
+  });
+  if (applyButton) {
+    applyButton.addEventListener("click", () => {
+      void applySchema();
+    });
+  }
+
+  return {
+    setProposal,
+    open,
+    clear() {
+      setProposal(null);
+    },
+  };
 }
