@@ -46,6 +46,18 @@ class SchemaAgent:
 
         unknown_fields: dict[str, Any] = evidence_summary.get("unknown_fields", {})
         if not unknown_fields:
+            unmatched = evidence_summary.get("unmatched_facts")
+            if isinstance(unmatched, list):
+                derived: dict[str, Any] = {}
+                for index, entry in enumerate(unmatched, start=1):
+                    if not isinstance(entry, dict):
+                        continue
+                    concept = entry.get("concept") or entry.get("column")
+                    concept = str(concept).strip() if concept else f"FIELD_{index}"
+                    value = entry.get("value")
+                    derived[concept] = value
+                unknown_fields = derived
+        if not unknown_fields:
             return {
                 "ticket_id": ticket_id,
                 "columns": [],

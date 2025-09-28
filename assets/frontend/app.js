@@ -434,15 +434,20 @@ function renderResult(result) {
   heading.style.margin = "0";
   container.appendChild(heading);
 
-  if (result.answers) {
+  if (Array.isArray(result.facts) && result.facts.length) {
     const list = document.createElement("ul");
-    list.className = "answers";
-    Object.entries(result.answers).forEach(([key, value]) => {
+    list.className = "facts";
+    result.facts.forEach((fact) => {
+      if (!fact || typeof fact !== "object") {
+        return;
+      }
+      const concept = fact.concept || "(concept)";
+      const value = fact.value;
       const item = document.createElement("li");
-      item.textContent = `${key}: ${value}`;
+      item.textContent = `${concept}: ${value}`;
       list.appendChild(item);
     });
-    container.appendChild(withLabel("Answers", list));
+    container.appendChild(withLabel("Facts", list));
   }
 
   if (Array.isArray(result.missing_columns) && result.missing_columns.length) {
@@ -474,8 +479,15 @@ function renderResult(result) {
   if (result.update) {
     const entries = [];
     if (result.update.status) entries.push(`Status: ${result.update.status}`);
-    if (Array.isArray(result.update.applied_fields) && result.update.applied_fields.length) {
-      entries.push(`Applied fields: ${result.update.applied_fields.join(", ")}`);
+    if (Array.isArray(result.update.applied_columns) && result.update.applied_columns.length) {
+      entries.push(`Applied columns: ${result.update.applied_columns.join(", ")}`);
+    } else if (Array.isArray(result.update.applied_facts) && result.update.applied_facts.length) {
+      result.update.applied_facts.forEach((fact) => {
+        if (!fact) return;
+        const concept = fact.concept || fact.column;
+        const column = fact.column;
+        entries.push(`Mapped fact '${concept}' to column '${column}'`);
+      });
     }
     if (result.update.escalated) entries.push("Escalated to schema agent");
     if (entries.length) {

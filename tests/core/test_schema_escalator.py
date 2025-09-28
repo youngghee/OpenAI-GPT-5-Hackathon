@@ -13,12 +13,12 @@ def test_jsonl_schema_escalator_appends(tmp_path: Path) -> None:
 
     escalator.escalate(
         ticket_id="T-1",
-        rationale={"unknown_fields": {"NEW_FIELD": "value"}},
+        rationale={"unmatched_facts": [{"concept": "NEW_FIELD", "value": "value"}]},
     )
 
     files = sorted(tmp_path.glob("*-T-1.jsonl"))
     assert len(files) == 1
     output = files[0]
     payload = json.loads(output.read_text(encoding="utf-8").strip())
-    assert payload["rationale"]["unknown_fields"]["NEW_FIELD"] == "value"
+    assert payload["rationale"]["unmatched_facts"][0]["concept"] == "NEW_FIELD"
     assert "timestamp" in payload

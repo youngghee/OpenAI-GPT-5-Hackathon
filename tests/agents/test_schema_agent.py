@@ -47,7 +47,12 @@ def test_schema_agent_generates_columns_and_migration() -> None:
 
     proposal = agent.propose_change(
         ticket_id="T-5",
-        evidence_summary={"unknown_fields": {"new_metric": 12.5, "flag": True}},
+        evidence_summary={
+            "unmatched_facts": [
+                {"concept": "new_metric", "value": 12.5},
+                {"concept": "flag", "value": True},
+            ]
+        },
     )
 
     assert proposal["migration_path"] == writer.path
@@ -76,7 +81,9 @@ def test_schema_agent_uses_llm_proposals() -> None:
 
     proposal = agent.propose_change(
         ticket_id="T-llm",
-        evidence_summary={"unknown_fields": {"Engagement Score": 0.42}},
+        evidence_summary={
+            "unmatched_facts": [{"concept": "Engagement Score", "value": 0.42}]
+        },
     )
 
     assert proposal["columns"][0]["name"] == "ENGAGEMENT_SCORE"

@@ -63,18 +63,26 @@ class _UpdateAgentStub:
     summaries: list[dict[str, Any]] = field(default_factory=list)
 
     def apply_enrichment(
-        self, *, ticket_id: str, record_id: str, enriched_fields: dict[str, Any]
+        self,
+        *,
+        ticket_id: str,
+        record_id: str,
+        facts: list[dict[str, Any]] | dict[str, Any],
     ) -> dict[str, Any]:
+        if isinstance(facts, dict):
+            fact_list = [facts]
+        else:
+            fact_list = list(facts)
         summary = {
             "ticket_id": ticket_id,
             "record_id": record_id,
-            "fields": enriched_fields,
+            "facts": fact_list,
         }
         self.summaries.append(summary)
-        response: dict[str, Any] = {"status": "simulated", "fields": enriched_fields}
-        unknown = {key: value for key, value in enriched_fields.items() if key.startswith("NEW")}
-        if unknown:
-            response["escalated"] = {"unknown_fields": unknown}
+        response: dict[str, Any] = {"status": "simulated", "facts": fact_list}
+        unmatched = [fact for fact in fact_list if str(fact.get("concept", ""))[:3].lower() == "new"]
+        if unmatched:
+            response["escalated"] = {"unmatched_facts": unmatched}
         return response
 
 
@@ -150,11 +158,12 @@ def test_runner_executes_scenarios() -> None:
     assert len(results) == 1
     result = results[0]
     assert result["status"] == "answered"
-    assert result["answers"] == {"BUSINESS_NAME": "Cafe"}
+    facts = result["facts"]
+    assert isinstance(facts, list) and facts[0]["value"] == "Cafe"
     assert result["update"]["status"] == "simulated"
     assert not flagger.calls
     assert not scraper.calls
-    assert updater.summaries and updater.summaries[0]["fields"] == {"BUSINESS_NAME": "Cafe"}
+    assert updater.summaries and updater.summaries[0]["facts"][0]["value"] == "Cafe"
     assert not schema_agent.calls
 
 
@@ -236,6 +245,8 @@ def test_runner_invokes_schema_agent_on_escalation() -> None:
 
     assert schema_agent.calls
     assert schema_agent.calls[0]["ticket_id"] == "T-3"
+    evidence = schema_agent.calls[0]["evidence_summary"]
+    assert evidence["unmatched_facts"][0]["concept"] == "NEW_METRIC"
     assert "schema_proposal" in result
 
 
@@ -338,8 +349,13 @@ def test_runner_incorporates_scraper_follow_up() -> None:
     llm_payload = json.dumps(
         {
             "status": "answered",
-            "answers": {"EMPLOYEE_COUNT": 1200},
-            "sources": {"EMPLOYEE_COUNT": "https://example.com/report"},
+            "facts": [
+                {
+                    "concept": "employee_count",
+                    "value": 1200,
+                    "sources": ["https://example.com/report"],
+                }
+            ],
         }
     )
 
@@ -359,12 +375,12 @@ def test_runner_incorporates_scraper_follow_up() -> None:
     result = runner.execute(profile="dev")[0]
 
     assert result["status"] == "answered"
-    assert result["answers"] == {"EMPLOYEE_COUNT": 1200}
+    assert result["facts"][0]["value"] == 1200
     assert result.get("answer_origin") == "scraper"
     assert result.get("previous_status") == "unknown_question"
-    assert result.get("answer_sources") == {"EMPLOYEE_COUNT": "https://example.com/report"}
+    assert result.get("fact_sources") == {"employee_count": "https://example.com/report"}
     assert result["scraper_findings"] == 1
-    assert updater.summaries and updater.summaries[0]["fields"] == {"EMPLOYEE_COUNT": 1200}
+    assert updater.summaries and updater.summaries[0]["facts"][0]["value"] == 1200
     assert flagger.calls, "Query agent should flag missing data before follow-up"
     assert llm.calls, "LLM should be invoked for follow-up synthesis"
 

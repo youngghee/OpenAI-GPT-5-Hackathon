@@ -71,10 +71,11 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
     migrations_dir = _resolve_migrations_dir(settings)
     migration_writer = FileMigrationWriter(base_dir=migrations_dir)
     crm_client = InMemoryCRMClient()
+    column_catalog = _detect_dataset_columns(executor)
     update_agent = UpdateAgent(
         crm_client=crm_client,
         schema_escalator=schema_escalator,
-        allowed_fields=None,
+        allowed_fields=column_catalog if column_catalog else None,
         llm_client=None,
     )
     schema_agent = SchemaAgent(migration_writer=migration_writer, llm_client=None)
@@ -255,3 +256,11 @@ def _detect_candidate_url_fields(executor: SQLExecutor) -> list[str]:
         if upper in URL_FIELD_HINTS:
             selected.append(column)
     return selected
+
+
+def _detect_dataset_columns(executor: SQLExecutor) -> set[str]:
+    """Return the available column names for the active dataset."""
+
+    if isinstance(executor, CsvSQLExecutor):
+        return {column.strip().upper() for column in executor.columns if column.strip()}
+    return set()

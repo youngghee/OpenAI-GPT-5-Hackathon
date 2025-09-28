@@ -39,6 +39,7 @@ def test_build_dependencies_uses_in_memory_when_no_csv(base_settings: Settings) 
     assert deps.missing_data_flagger is not None
     assert isinstance(deps.scraper_agent.search_client, NullSearchClient)
     assert deps.update_agent is not None
+    assert deps.update_agent.allowed_fields is None
     assert deps.schema_agent is not None
     assert deps.query_logger is not None
     assert deps.scraper_logger is not None
@@ -61,6 +62,7 @@ def test_build_dependencies_uses_csv_path(
     assert deps.missing_data_flagger is not None
     assert deps.scraper_agent is not None
     assert deps.update_agent is not None
+    assert deps.update_agent.allowed_fields == {"ID"}
     assert deps.schema_agent is not None
     assert deps.query_logger is not None
     assert deps.scraper_logger is not None

@@ -330,14 +330,15 @@ class TimelineUpdateAgent:
         *,
         ticket_id: str,
         record_id: str,
-        enriched_fields: dict[str, Any],
+        facts: list[dict[str, Any]] | dict[str, Any],
     ) -> dict[str, Any]:
-        if enriched_fields:
-            self.timeline.add("update", "Passing new fields to the update agent.")
+        has_facts = bool(facts) if not isinstance(facts, dict) else bool(facts)
+        if has_facts:
+            self.timeline.add("update", "Passing new facts to the update agent.")
         else:
-            self.timeline.add("update", "Update agent check with no new fields provided.")
+            self.timeline.add("update", "Update agent check with no new facts provided.")
         result = self.inner.apply_enrichment(
-            ticket_id=ticket_id, record_id=record_id, enriched_fields=enriched_fields
+            ticket_id=ticket_id, record_id=record_id, facts=facts
         )
         status = result.get("status")
         if status:

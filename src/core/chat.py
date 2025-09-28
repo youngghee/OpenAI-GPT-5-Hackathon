@@ -94,11 +94,15 @@ class ChatCLI:
         status = str(result.get("status", "unknown"))
         self.output_func(f"[{conversation_ticket}] status: {status}")
 
-        answers = result.get("answers")
-        if isinstance(answers, dict) and answers:
-            self.output_func("Answers:")
-            for key, value in answers.items():
-                self.output_func(f"  - {key}: {value}")
+        facts = result.get("facts")
+        if isinstance(facts, list) and facts:
+            self.output_func("Facts:")
+            for entry in facts:
+                if not isinstance(entry, dict):
+                    continue
+                concept = entry.get("concept") or "(unknown concept)"
+                value = entry.get("value")
+                self.output_func(f"  - {concept}: {value}")
 
         missing = result.get("missing_columns")
         if isinstance(missing, list) and missing:
@@ -121,12 +125,22 @@ class ChatCLI:
         update_summary = result.get("update")
         if isinstance(update_summary, dict) and update_summary:
             status_text = update_summary.get("status")
-            applied = update_summary.get("applied_fields")
+            applied_columns = update_summary.get("applied_columns")
+            applied_facts = update_summary.get("applied_facts")
             self.output_func("Update summary:")
             if status_text:
                 self.output_func(f"  - status: {status_text}")
-            if isinstance(applied, list) and applied:
-                self.output_func("  - applied fields: " + ", ".join(applied))
+            if isinstance(applied_columns, list) and applied_columns:
+                self.output_func("  - applied columns: " + ", ".join(applied_columns))
+            elif isinstance(applied_facts, list) and applied_facts:
+                for entry in applied_facts:
+                    if not isinstance(entry, dict):
+                        continue
+                    concept = entry.get("concept") or entry.get("column")
+                    column = entry.get("column")
+                    self.output_func(
+                        f"  - fact '{concept}' mapped to column '{column}'"
+                    )
 
             escalated = update_summary.get("escalated")
             if isinstance(escalated, dict) and escalated:
@@ -220,14 +234,15 @@ class ChatUpdateAgent:
         *,
         ticket_id: str,
         record_id: str,
-        enriched_fields: dict[str, Any],
+        facts: list[dict[str, Any]] | dict[str, Any],
     ) -> dict[str, Any]:
-        if enriched_fields:
-            self.emit("  ↳ Passing new fields to the update agent.")
+        has_facts = bool(facts) if not isinstance(facts, dict) else bool(facts)
+        if has_facts:
+            self.emit("  ↳ Passing new facts to the update agent.")
         else:
-            self.emit("  ↳ Update agent check with no new fields provided.")
+            self.emit("  ↳ Update agent check with no new facts provided.")
         result = self.inner.apply_enrichment(
-            ticket_id=ticket_id, record_id=record_id, enriched_fields=enriched_fields
+            ticket_id=ticket_id, record_id=record_id, facts=facts
         )
         status = result.get("status")
         if status:
@@ -280,11 +295,16 @@ def describe_query_event(event: str, payload: dict[str, Any]) -> str:
     if event == "missing_data_flagged":
         reason = payload.get("facts", {}).get("reason", "missing data")
         return f"Flagged missing data ({reason}); asking the scraper agent to investigate."
-    if event == "answer_ready":
-        columns = payload.get("columns", [])
-        if columns:
-            return "Answer ready with columns: " + ", ".join(str(c) for c in columns)
-        return "Answer ready."
+    if event == "facts_ready":
+        concepts = [str(c) for c in payload.get("concepts", []) if c]
+        if concepts:
+            return "Facts ready for: " + ", ".join(concepts)
+        return "Facts ready."
+    if event == "llm_facts":
+        concepts = [str(c) for c in payload.get("concepts", []) if c]
+        if concepts:
+            return "LLM proposed facts for: " + ", ".join(concepts)
+        return "LLM proposed follow-up facts."
     if event == "llm_answer":
         columns = payload.get("columns", [])
         if columns:
@@ -295,6 +315,11 @@ def describe_query_event(event: str, payload: dict[str, Any]) -> str:
         return f"Completed question with status '{status}'."
     if event == "llm_error":
         return "LLM request failed; falling back to deterministic logic."
+    if event == "scraper_follow_up_answered":
+        concepts = [str(c) for c in payload.get("concepts", []) if c]
+        if concepts:
+            return "Scraper follow-up supplied facts for: " + ", ".join(concepts)
+        return "Scraper follow-up supplied additional facts."
     return f"Query event: {event}"
 
 

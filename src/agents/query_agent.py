@@ -129,14 +129,14 @@ class QueryAgent:
             )
             return result
 
-        answers = self._resolve_answers(ticket_id, question, row, columns)
-        if not answers:
-            facts = {"reason": "missing_values", "missing_columns": columns}
+        facts = self._resolve_facts(ticket_id, question, row, columns)
+        if not facts:
+            missing_details = {"reason": "missing_values", "missing_columns": columns}
             if candidate_urls:
-                facts["candidate_urls"] = candidate_urls
+                missing_details["candidate_urls"] = candidate_urls
             if record_context:
-                facts["record_context"] = record_context
-            self._flag_missing(ticket_id, question, facts)
+                missing_details["record_context"] = record_context
+            self._flag_missing(ticket_id, question, missing_details)
             result = {
                 "ticket_id": ticket_id,
                 "record_id": record_id,
@@ -155,15 +155,18 @@ class QueryAgent:
 
         self._log_event(
             ticket_id,
-            "answer_ready",
-            {"record_id": record_id, "columns": list(answers.keys())},
+            "facts_ready",
+            {
+                "record_id": record_id,
+                "concepts": [fact.get("concept") for fact in facts],
+            },
         )
         result = {
             "ticket_id": ticket_id,
             "record_id": record_id,
             "question": question,
             "status": "answered",
-            "answers": answers,
+            "facts": facts,
             "candidate_urls": candidate_urls,
         }
         if record_context:
@@ -237,9 +240,9 @@ class QueryAgent:
 
         row_keys = set(row.keys()) if isinstance(row, dict) else set()
         follow_up = self._extract_follow_up_response(response, row_keys)
-        answers = follow_up.get("answers") if follow_up else None
+        facts = follow_up.get("facts") if follow_up else None
 
-        if not answers:
+        if not facts:
             self._log_event(
                 ticket_id,
                 "scraper_follow_up_insufficient",
@@ -250,7 +253,9 @@ class QueryAgent:
         self._log_event(
             ticket_id,
             "scraper_follow_up_answered",
-            {"fields": list(answers.keys())},
+            {
+                "concepts": [fact.get("concept") for fact in facts if isinstance(fact, dict)],
+            },
         )
 
         result: dict[str, Any] = {
@@ -258,20 +263,22 @@ class QueryAgent:
             "record_id": record_id,
             "question": question,
             "status": follow_up.get("status", "answered"),
-            "answers": answers,
+            "facts": facts,
         }
         if candidate_urls:
             result.setdefault("candidate_urls", candidate_urls)
         if context:
             result.setdefault("record_context", context)
 
-        sources = follow_up.get("sources")
-        if sources:
-            result["answer_sources"] = sources
+        if follow_up.get("sources"):
+            result["aggregate_sources"] = follow_up["sources"]
 
-        notes = follow_up.get("notes")
-        if notes:
-            result["answer_notes"] = notes
+        if follow_up.get("notes"):
+            result["answer_notes"] = follow_up["notes"]
+
+        fact_source_map = self._collect_fact_sources(facts)
+        if fact_source_map:
+            result["fact_sources"] = fact_source_map
 
         result["answer_origin"] = "scraper"
         return result
@@ -327,26 +334,67 @@ class QueryAgent:
                 break
         return unique_candidates
 
-    def _resolve_answers(
+    def _resolve_facts(
         self,
         ticket_id: str,
         question: str,
         row: dict[str, Any],
         columns: list[str],
-    ) -> dict[str, Any]:
-        if self.llm_client:
-            llm_answers = self._resolve_answers_with_llm(ticket_id, question, row)
-            if llm_answers:
-                return llm_answers
+    ) -> list[dict[str, Any]]:
+        direct_facts = self._collect_direct_facts(row, columns)
+        if direct_facts:
+            return direct_facts
 
-        direct_answers = {column: row[column] for column in columns if self._has_value(row.get(column))}
-        return direct_answers
-
-    def _resolve_answers_with_llm(
-        self, ticket_id: str, question: str, row: dict[str, Any]
-    ) -> dict[str, Any]:
         if self.llm_client is None:
-            return {}
+            return []
+
+        llm_facts = self._resolve_facts_with_llm(ticket_id, question, row)
+        if llm_facts:
+            return llm_facts
+        return []
+
+    def _collect_direct_facts(
+        self, row: dict[str, Any], columns: list[str]
+    ) -> list[dict[str, Any]]:
+        facts: list[dict[str, Any]] = []
+        for column in columns:
+            value = row.get(column)
+            if not self._has_value(value):
+                continue
+            facts.append(
+                self._fact_from_column(
+                    column=column,
+                    value=value,
+                    origin="dataset",
+                    confidence=1.0,
+                )
+            )
+        return facts
+
+    def _fact_from_column(
+        self,
+        *,
+        column: str,
+        value: Any,
+        origin: str,
+        confidence: float | None = None,
+    ) -> dict[str, Any]:
+        concept = self._column_to_concept(column)
+        fact: dict[str, Any] = {
+            "concept": concept,
+            "value": value,
+            "origin": origin,
+        }
+        if confidence is not None:
+            fact["confidence"] = confidence
+        fact["candidate_columns"] = [column]
+        return fact
+
+    def _resolve_facts_with_llm(
+        self, ticket_id: str, question: str, row: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        if self.llm_client is None:
+            return []
 
         prompt = self._build_prompt(question, row)
         try:
@@ -355,19 +403,18 @@ class QueryAgent:
             self._log_event(
                 ticket_id,
                 "llm_error",
-                {"error": str(exc)},
+                {"stage": "direct_answer", "error": str(exc)},
             )
-            return {}
+            return []
 
-        allowed_fields = set(row.keys())
-        answers = self._extract_answers_from_response(response, allowed_fields)
-        if answers:
+        facts = self._extract_facts_from_response(response)
+        if facts:
             self._log_event(
                 ticket_id,
-                "llm_answer",
-                {"columns": list(answers.keys())},
+                "llm_facts",
+                {"concepts": [fact.get("concept") for fact in facts]},
             )
-        return answers
+        return facts
 
     def _build_prompt(self, question: str, row: dict[str, Any]) -> list[dict[str, str]]:
         context = json.dumps(row, ensure_ascii=False)
@@ -375,10 +422,15 @@ class QueryAgent:
             {
                 "role": "system",
                 "content": (
-                    "You are a CRM analyst. Use the provided record JSON to answer the"
-                    " stakeholder's question. Respond with a JSON object whose keys are"
-                    " relevant column names from the record and whose values are the"
-                    " corresponding answers. If information is missing, omit the key."
+                    "You are a CRM analyst. Use the record JSON to answer the"
+                    " stakeholder's question. Respond with JSON containing 'status' and"
+                    " 'facts'. 'status' must be 'answered' or 'insufficient'. 'facts'"
+                    " must be an array of objects with the keys 'concept' (lower_snake_case"
+                    " semantic label), 'value', optional 'confidence' (0-1), optional"
+                    " 'notes', optional 'sources' (array of URLs or citations), and"
+                    " optional 'column_hint' if an existing column clearly matches. If"
+                    " the record does not contain the information, return 'status':"
+                    " 'insufficient' with an empty facts array. Do not invent values."
                 ),
             },
             {
@@ -402,13 +454,14 @@ class QueryAgent:
         columns_text = ", ".join(columns) if columns else "none"
         instructions = (
             "You are a CRM analyst. Use the record context and external evidence to answer"
-            " the stakeholder's question. Respond with JSON containing the keys"
-            " 'status', 'answers', 'sources', and 'notes'. 'status' must be either"
-            " 'answered' or 'insufficient'. 'answers' maps FIELD_NAME to value, using"
-            " UPPER_SNAKE_CASE and reusing existing column names when applicable."
-            " 'sources' maps the same field names to the best supporting URL."
-            " 'notes' provides a short rationale and may be omitted if unnecessary."
-            " Only include answers that the evidence supports."
+            " the stakeholder's question. Respond with JSON containing 'status' and"
+            " 'facts'. 'status' must be 'answered' or 'insufficient'. 'facts' must be"
+            " an array where each item includes: 'concept' (lower_snake_case semantic"
+            " label), 'value', optional 'confidence' (0-1), optional 'sources' (array"
+            " of supporting URLs drawn from the evidence), optional 'notes', and"
+            " optional 'column_hint' if an existing column clearly matches. Only"
+            " include facts that the evidence supports; otherwise return an empty"
+            " array with status 'insufficient'."
         )
         user_content = (
             f"Question: {question}\n"
@@ -427,56 +480,43 @@ class QueryAgent:
     def _extract_follow_up_response(
         self, response: Any, row_keys: set[str]
     ) -> dict[str, Any]:  # pragma: no cover - thin wrapper around parsing helper
-        lookup: dict[str, str] = {}
-        for key in row_keys:
-            upper = key.upper()
-            lookup[upper] = key
-            sanitized = re.sub(r"[^A-Z0-9]+", "_", upper).strip("_")
-            if sanitized:
-                lookup[sanitized] = key
+        column_lookup = self._build_column_lookup(row_keys)
 
         for payload in self._iter_json_payloads(response):
-            answers_section = payload.get("answers") if isinstance(payload, dict) else None
-            if isinstance(answers_section, dict):
-                answer_candidates = answers_section
-            else:
-                answer_candidates = {
-                    key: value
-                    for key, value in payload.items()
-                    if key not in {"status", "sources", "notes"}
-                }
+            if not isinstance(payload, dict):
+                continue
 
-            answers: dict[str, Any] = {}
-            for key, value in answer_candidates.items():
-                if not self._has_value(value):
-                    continue
-                canonical = self._canonicalise_field_name(str(key), lookup)
-                answers[canonical] = value
+            facts = self._parse_fact_payload(
+                payload,
+                origin="scraper",
+                valid_columns=column_lookup,
+            )
 
-            raw_sources = payload.get("sources") if isinstance(payload, dict) else None
-            sources: dict[str, str] = {}
-            if isinstance(raw_sources, dict):
-                for key, value in raw_sources.items():
-                    if not isinstance(value, str) or not value.strip():
-                        continue
-                    canonical = self._canonicalise_field_name(str(key), lookup)
-                    sources[canonical] = value.strip()
+            status_value = payload.get("status")
+            raw_status = (
+                status_value.strip().lower()
+                if isinstance(status_value, str) and status_value.strip()
+                else None
+            )
+            if raw_status not in {"answered", "insufficient"}:
+                raw_status = "answered" if facts else "insufficient"
 
-            notes_value = payload.get("notes") if isinstance(payload, dict) else None
+            notes_value = payload.get("notes")
             notes = notes_value.strip() if isinstance(notes_value, str) and notes_value.strip() else None
 
-            status_value = payload.get("status") if isinstance(payload, dict) else None
-            raw_status = status_value.strip().lower() if isinstance(status_value, str) and status_value.strip() else None
-            if raw_status not in {"answered", "insufficient"}:
-                raw_status = "answered" if answers else "insufficient"
+            aggregate_sources = self._normalize_sources(payload.get("sources"))
 
-            if answers or notes or sources or raw_status:
-                return {
-                    "answers": answers,
-                    "sources": sources,
-                    "notes": notes,
+            if facts or notes or aggregate_sources or raw_status:
+                result: dict[str, Any] = {
+                    "facts": facts,
                     "status": raw_status or "insufficient",
                 }
+                if notes:
+                    result["notes"] = notes
+                if aggregate_sources:
+                    result["sources"] = aggregate_sources
+                return result
+
         return {}
 
     @staticmethod
@@ -603,36 +643,176 @@ class QueryAgent:
         seen.add(normalized)
         return True
 
-    @staticmethod
-    def _canonicalise_field_name(field: str, lookup: dict[str, str]) -> str:
-        candidate = field.strip()
-        if not candidate:
-            return candidate
-        upper = candidate.upper()
-        if upper in lookup:
-            return lookup[upper]
-        sanitized = re.sub(r"[^A-Z0-9]+", "_", upper).strip("_")
-        if sanitized in lookup:
-            return lookup[sanitized]
-        return sanitized or upper
+    def _extract_facts_from_response(self, response: Any, *, origin: str = "llm") -> list[dict[str, Any]]:
+        for payload in QueryAgent._iter_json_payloads(response):
+            if not isinstance(payload, dict):
+                continue
+            facts = self._parse_fact_payload(payload, origin=origin, valid_columns=None)
+            if facts:
+                return facts
+        return []
+
+    def _parse_fact_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        origin: str,
+        valid_columns: dict[str, str] | None,
+    ) -> list[dict[str, Any]]:
+        facts_section = payload.get("facts")
+        if not isinstance(facts_section, list):
+            return []
+
+        resolved: list[dict[str, Any]] = []
+        for entry in facts_section:
+            if not isinstance(entry, dict):
+                continue
+            concept_raw = entry.get("concept")
+            value = entry.get("value")
+            if not isinstance(concept_raw, str) or not self._has_value(value):
+                continue
+            concept = self._canonicalise_concept(concept_raw)
+            if not concept:
+                continue
+
+            fact: dict[str, Any] = {
+                "concept": concept,
+                "value": value,
+                "origin": origin,
+            }
+
+            confidence = entry.get("confidence")
+            if isinstance(confidence, (int, float)):
+                fact["confidence"] = max(0.0, min(1.0, float(confidence)))
+            elif origin != "dataset":
+                fact["confidence"] = 0.6
+
+            notes = entry.get("notes")
+            if isinstance(notes, str) and notes.strip():
+                fact["notes"] = notes.strip()
+
+            sources = entry.get("sources")
+            formatted_sources = self._normalize_sources(sources)
+            if formatted_sources:
+                fact["sources"] = formatted_sources
+
+            candidate_columns: list[str] = []
+            raw_candidates = entry.get("candidate_columns")
+            if isinstance(raw_candidates, (list, tuple)):
+                candidate_columns.extend(
+                    str(item).strip()
+                    for item in raw_candidates
+                    if isinstance(item, (str, int, float)) and str(item).strip()
+                )
+            else:
+                column_hint = (
+                    entry.get("column_hint")
+                    or entry.get("field")
+                    or entry.get("column")
+                    or entry.get("target")
+                )
+                if isinstance(column_hint, str) and column_hint.strip():
+                    candidate_columns.append(column_hint.strip())
+
+            if candidate_columns:
+                normalized = self._normalize_column_candidates(candidate_columns, valid_columns)
+                if normalized:
+                    fact["candidate_columns"] = normalized
+
+            resolved.append(fact)
+
+        return resolved
 
     @staticmethod
-    def _extract_answers_from_response(
-        response: Any, allowed_fields: set[str] | None
-    ) -> dict[str, Any]:  # pragma: no cover - thin wrapper
-        for payload in QueryAgent._iter_json_payloads(response):
-            candidate = payload.get("answers") if isinstance(payload, dict) else None
-            answers_dict = candidate if isinstance(candidate, dict) else payload
-            filtered: dict[str, Any] = {}
-            for key, value in answers_dict.items():
-                if not QueryAgent._has_value(value):
-                    continue
-                if allowed_fields is not None and key not in allowed_fields:
-                    continue
-                filtered[key] = value
-            if filtered:
-                return filtered
-        return {}
+    def _normalize_sources(sources: Any) -> list[str]:
+        normalized: list[str] = []
+        if isinstance(sources, (list, tuple)):
+            iterable = sources
+        else:
+            iterable = [sources]
+
+        for item in iterable:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if not text:
+                continue
+            normalized.append(text)
+
+        return normalized
+
+    def _normalize_column_candidates(
+        self, candidates: list[str], valid_columns: dict[str, str] | None
+    ) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            resolved = self._resolve_column_hint(candidate, valid_columns)
+            if not resolved:
+                continue
+            if resolved not in seen:
+                seen.add(resolved)
+                unique.append(resolved)
+        return unique
+
+    @staticmethod
+    def _resolve_column_hint(candidate: str, valid_columns: dict[str, str] | None) -> str | None:
+        cleaned = candidate.strip()
+        if not cleaned:
+            return None
+        if not valid_columns:
+            return cleaned
+
+        upper = cleaned.upper()
+        if upper in valid_columns:
+            return valid_columns[upper]
+
+        sanitized = re.sub(r"[^A-Z0-9]+", "_", upper).strip("_")
+        if sanitized in valid_columns:
+            return valid_columns[sanitized]
+
+        return cleaned
+
+    @staticmethod
+    def _canonicalise_concept(concept: str) -> str:
+        lowered = concept.strip().lower()
+        if not lowered:
+            return ""
+        return re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+
+    @staticmethod
+    def _build_column_lookup(columns: set[str]) -> dict[str, str]:
+        lookup: dict[str, str] = {}
+        for column in columns:
+            label = column.strip()
+            if not label:
+                continue
+            upper = label.upper()
+            lookup[upper] = column
+            sanitized = re.sub(r"[^A-Z0-9]+", "_", upper).strip("_")
+            if sanitized:
+                lookup[sanitized] = column
+        return lookup
+
+    @staticmethod
+    def _collect_fact_sources(facts: Sequence[dict[str, Any]]) -> dict[str, str]:
+        sources_map: dict[str, str] = {}
+        for fact in facts:
+            if not isinstance(fact, dict):
+                continue
+            concept = fact.get("concept")
+            sources = fact.get("sources")
+            if not isinstance(concept, str) or not concept:
+                continue
+            if isinstance(sources, (list, tuple)):
+                for candidate in sources:
+                    text = str(candidate).strip() if candidate is not None else ""
+                    if text:
+                        sources_map.setdefault(concept, text)
+                        break
+            elif isinstance(sources, str) and sources.strip():
+                sources_map.setdefault(concept, sources.strip())
+        return sources_map
 
     @staticmethod
     def _has_value(value: Any) -> bool:
@@ -651,6 +831,13 @@ class QueryAgent:
             column.replace("_", " ").lower(),
         }
         return {phrase for phrase in base.union(derived) if phrase}
+
+    @staticmethod
+    def _column_to_concept(column: str) -> str:
+        normalized = QueryAgent._normalize(column)
+        if not normalized:
+            return column.strip().lower()
+        return normalized.replace(" ", "_")
 
     @staticmethod
     def _column_tokens_in_question(column: str, question: str) -> bool:

@@ -71,7 +71,11 @@ def test_answer_question_returns_column_value() -> None:
     )
 
     assert result["status"] == "answered"
-    assert result["answers"] == {"BUSINESS_NAME": "Cafe Example"}
+    facts = result["facts"]
+    assert isinstance(facts, list) and facts
+    first_fact = facts[0]
+    assert first_fact["concept"] == "business_name"
+    assert first_fact["value"] == "Cafe Example"
     assert executor.statements == ["SELECT * FROM dataset WHERE BRIZO_ID = 'abc' LIMIT 1"]
     assert flagger.calls == []
 
@@ -141,6 +145,7 @@ def test_answer_question_emits_observability_events() -> None:
     assert "sql_executed" in events
     assert "record_fetch_result" in events
     assert "columns_inferred" in events
+    assert "facts_ready" in events
     assert events.count("question_resolved") == 1
 
 
@@ -158,7 +163,10 @@ class _LLMResponse:
 
 
 class _LLMClientStub:
-    def __init__(self, response_text: str = '{"BUSINESS_NAME": "Example LLC"}') -> None:
+    def __init__(
+        self,
+        response_text: str = '{"status": "answered", "facts": [{"concept": "business_name", "value": "Example LLC"}]}'
+    ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.response_text = response_text
 
@@ -189,7 +197,8 @@ def test_query_agent_uses_llm_when_columns_missing() -> None:
     )
 
     assert result["status"] == "answered"
-    assert result["answers"] == {"BUSINESS_NAME": "Example LLC"}
+    facts = result.get("facts")
+    assert isinstance(facts, list) and facts[0]["value"] == "Example LLC"
     assert not flagger.calls
     assert llm.calls
 
@@ -204,9 +213,14 @@ def test_query_agent_incorporates_scraper_findings_with_llm() -> None:
     follow_up_payload = json.dumps(
         {
             "status": "answered",
-            "answers": {"EMPLOYEE_COUNT": 1200},
-            "sources": {"EMPLOYEE_COUNT": "https://example.com/report"},
-            "notes": "Derived from the annual report."
+            "facts": [
+                {
+                    "concept": "employee_count",
+                    "value": 1200,
+                    "sources": ["https://example.com/report"],
+                    "notes": "Derived from the annual report.",
+                }
+            ],
         }
     )
     llm = _LLMClientStub(response_text=follow_up_payload)
@@ -241,7 +255,9 @@ def test_query_agent_incorporates_scraper_findings_with_llm() -> None:
 
     assert follow_up is not None
     assert follow_up["status"] == "answered"
-    assert follow_up["answers"] == {"EMPLOYEE_COUNT": 1200}
+    facts = follow_up["facts"]
+    assert facts[0]["concept"] == "employee_count"
+    assert facts[0]["value"] == 1200
     assert follow_up["answer_origin"] == "scraper"
-    assert follow_up["answer_sources"] == {"EMPLOYEE_COUNT": "https://example.com/report"}
-    assert "Derived" in follow_up["answer_notes"]
+    assert follow_up["fact_sources"] == {"employee_count": "https://example.com/report"}
+    assert "Derived" in facts[0].get("notes", "")

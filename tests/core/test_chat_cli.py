@@ -53,17 +53,25 @@ class _UpdateAgentStub:
     summaries: list[dict[str, Any]] = field(default_factory=list)
 
     def apply_enrichment(
-        self, *, ticket_id: str, record_id: str, enriched_fields: dict[str, Any]
+        self,
+        *,
+        ticket_id: str,
+        record_id: str,
+        facts: list[dict[str, Any]] | dict[str, Any],
     ) -> dict[str, Any]:
+        if isinstance(facts, dict):
+            fact_list = [facts]
+        else:
+            fact_list = list(facts)
         summary = {
             "ticket_id": ticket_id,
             "record_id": record_id,
-            "fields": enriched_fields,
+            "facts": fact_list,
         }
         self.summaries.append(summary)
         return {
-            "status": "updated" if enriched_fields else "skipped",
-            "applied_fields": sorted(enriched_fields.keys()),
+            "status": "updated" if fact_list else "skipped",
+            "applied_facts": fact_list,
         }
 
 
@@ -130,7 +138,7 @@ def test_chat_cli_answers_question() -> None:
     cli.start(record_id="row-1")
 
     assert any("status: answered" in line for line in outputs)
-    assert any("BUSINESS_NAME" in line for line in outputs)
+    assert any("business_name" in line or "Cafe Example" in line for line in outputs)
     assert any(line.startswith("  ↳ Received question") for line in outputs)
 
 

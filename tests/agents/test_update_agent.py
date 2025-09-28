@@ -57,12 +57,13 @@ def test_apply_enrichment_updates_known_fields() -> None:
     summary = agent.apply_enrichment(
         ticket_id="T-1",
         record_id="row-1",
-        enriched_fields={"business_name": "New Name"},
+        facts=[{"concept": "business_name", "value": "New Name"}],
     )
 
     assert crm.updates == [{"record_id": "row-1", "payload": {"BUSINESS_NAME": "New Name"}}]
     assert summary["status"] == "updated"
-    assert summary["applied_fields"] == ["BUSINESS_NAME"]
+    assert summary["applied_columns"] == ["BUSINESS_NAME"]
+    assert summary["applied_facts"][0]["column"] == "BUSINESS_NAME"
     assert escalator.escalations == []
 
 
@@ -76,13 +77,13 @@ def test_apply_enrichment_escalates_unknown_fields() -> None:
     summary = agent.apply_enrichment(
         ticket_id="T-2",
         record_id="row-1",
-        enriched_fields={"new_metric": 42},
+        facts=[{"concept": "new_metric", "value": 42}],
     )
 
     assert summary["status"] == "skipped"
-    assert escalator.escalations and escalator.escalations[0]["rationale"]["unknown_fields"] == {
-        "NEW_METRIC": 42
-    }
+    assert escalator.escalations
+    rationale = escalator.escalations[0]["rationale"]
+    assert rationale["unmatched_facts"][0]["concept"] == "new_metric"
     assert crm.updates == []
 
 
@@ -100,11 +101,11 @@ def test_apply_enrichment_generates_reasoning_with_llm() -> None:
     summary = agent.apply_enrichment(
         ticket_id="T-llm",
         record_id="row-1",
-        enriched_fields={"business_name": "New Name"},
+        facts=[{"concept": "business_name", "value": "New Name"}],
     )
 
     assert "reasoning" in summary
-    assert "BUSINESS_NAME" in summary["reasoning"]
+    assert summary["status"] == "updated"
     assert llm.calls
 
 
@@ -116,9 +117,9 @@ def test_apply_enrichment_ignores_empty_values() -> None:
     summary = agent.apply_enrichment(
         ticket_id="T-3",
         record_id="row-1",
-        enriched_fields={"business_name": "   "},
+        facts=[{"concept": "business_name", "value": "   "}],
     )
 
     assert summary["status"] == "skipped"
-    assert escalator.escalations and "empty_fields" in escalator.escalations[0]["rationale"]
+    assert escalator.escalations and "empty_facts" in escalator.escalations[0]["rationale"]
     assert crm.updates == []

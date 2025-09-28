@@ -137,7 +137,8 @@ def test_ask_question_returns_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
         assert result_payload is not None, "ticket did not complete in time"
         assert result_payload["result"]["status"] == "answered"
-        assert result_payload["result"]["answers"]["BUSINESS_NAME"] == "Cafe Example"
+        facts = result_payload["result"]["facts"]
+        assert isinstance(facts, list) and facts[0]["value"] == "Cafe Example"
         timeline_messages = [entry["message"] for entry in result_payload["timeline"]]
         assert any("Received question" in message for message in timeline_messages)
 
