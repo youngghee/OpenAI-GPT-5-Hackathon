@@ -424,6 +424,7 @@ function applyResult(ticketId, refs, result) {
   refs.summary.classList.remove("processing");
   refs.summary.innerHTML = "";
   refs.summary.appendChild(renderResult(result || {}));
+  maybeRefreshDatasetAfterUpdate(result);
   conversationElement.scrollTop = conversationElement.scrollHeight;
 }
 
@@ -544,6 +545,103 @@ function renderResult(result) {
   }
 
   return container;
+}
+
+function maybeRefreshDatasetAfterUpdate(result) {
+  if (!shouldRefreshAfterUpdate(result)) {
+    return;
+  }
+  void refreshSessionRecord();
+}
+
+function shouldRefreshAfterUpdate(result) {
+  if (!result || typeof result !== "object") {
+    return false;
+  }
+  const update = result.update;
+  if (!update || typeof update !== "object") {
+    return false;
+  }
+  if (update.status !== "updated") {
+    return false;
+  }
+  return Boolean(state.session && state.session.recordId);
+}
+
+async function refreshSessionRecord() {
+  const recordId = state.session.recordId;
+  if (!recordId) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `/api/dataset/records/${encodeURIComponent(recordId)}`
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      const detail = (payload && payload.detail) || "Failed to refresh record";
+      throw new Error(detail);
+    }
+    applyRefreshedRecord(payload);
+  } catch (error) {
+    console.error("Failed to refresh record after update", error);
+  }
+}
+
+function applyRefreshedRecord(payload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+
+  const record = payload.record;
+  if (!record || typeof record !== "object") {
+    return;
+  }
+
+  const primaryKey = payload.primary_key || state.dataset.primaryKey;
+  if (typeof primaryKey === "string" && primaryKey) {
+    state.dataset.primaryKey = primaryKey;
+  }
+  const keyField = state.dataset.primaryKey;
+  const recordId = record[keyField];
+  if (!recordId) {
+    return;
+  }
+
+  let foundIndex = -1;
+  for (let index = 0; index < state.dataset.rows.length; index += 1) {
+    const existing = state.dataset.rows[index];
+    if (existing && existing[keyField] === recordId) {
+      state.dataset.rows[index] = { ...existing, ...record };
+      foundIndex = index;
+      break;
+    }
+  }
+
+  if (foundIndex !== -1) {
+    renderRows();
+    const updatedRow = state.dataset.rows[foundIndex];
+    const rows = Array.from(datasetTableBody.querySelectorAll("tr[data-record-id]"));
+    const rowElement = rows.find((element) => element.dataset.recordId === String(recordId));
+    if (updatedRow && rowElement) {
+      selectRow(recordId, updatedRow, rowElement);
+    }
+  } else if (state.selection.recordId === recordId) {
+    const previous =
+      state.selection.row && typeof state.selection.row === "object"
+        ? state.selection.row
+        : {};
+    state.selection.row = { ...previous, ...record };
+  }
+
+  if (Array.isArray(payload.candidate_urls)) {
+    renderCandidateUrls(payload.candidate_urls);
+  }
+
+  if (payload.record_context && typeof payload.record_context === "object") {
+    renderRecordContext(payload.record_context);
+  }
 }
 
 function renderCandidateUrls(urls) {

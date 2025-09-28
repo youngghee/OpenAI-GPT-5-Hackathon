@@ -66,6 +66,16 @@ def sample_dataset(tmp_path: Path) -> Path:
     return csv_path
 
 
+@pytest.fixture()
+def enriched_dataset(tmp_path: Path) -> Path:
+    csv_path = tmp_path / "dataset.csv"
+    csv_path.write_text(
+        """BRIZO_ID,BUSINESS_NAME,EMPLOYEE_COUNT\nrow-1,Cafe Example,\n""",
+        encoding="utf-8",
+    )
+    return csv_path
+
+
 def test_start_session_returns_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_dataset: Path) -> None:
     config_path = _write_config(tmp_path)
     monkeypatch.setenv("CSV_DATA_PATH", str(sample_dataset))
@@ -107,6 +117,81 @@ def test_dataset_rows_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
         assert payload["rows"][0]["BRIZO_ID"] == "row-1"
         assert payload["has_more"] is False
         assert payload["primary_key"] == "BRIZO_ID"
+
+
+def test_dataset_record_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_dataset: Path) -> None:
+    config_path = _write_config(tmp_path)
+    monkeypatch.setenv("CSV_DATA_PATH", str(sample_dataset))
+
+    app = create_app(config_path=str(config_path))
+    with TestClient(app) as client:
+        response = client.get("/api/dataset/records/row-1")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["record"]["BUSINESS_NAME"] == "Cafe Example"
+        assert payload["record_context"]["BUSINESS_NAME"] == "Cafe Example"
+        assert any(url.endswith("example.com") for url in payload["candidate_urls"])
+        assert payload["primary_key"] == "BRIZO_ID"
+
+
+def test_question_refreshes_dataset_after_update(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    enriched_dataset: Path,
+) -> None:
+    config_path = _write_config(tmp_path)
+    monkeypatch.setenv("CSV_DATA_PATH", str(enriched_dataset))
+
+    updated_value = "45"
+
+    def fake_run_scenario(dependencies, scenario):  # type: ignore[override]
+        executor = dependencies.sql_executor
+        if hasattr(executor, "apply_update"):
+            executor.apply_update(
+                primary_key="BRIZO_ID",
+                record_id=scenario["record_id"],
+                updates={"EMPLOYEE_COUNT": updated_value},
+            )
+        return {
+            "status": "answered",
+            "facts": [
+                {"concept": "EMPLOYEE_COUNT", "value": updated_value},
+            ],
+            "update": {
+                "status": "updated",
+                "applied_columns": ["EMPLOYEE_COUNT"],
+            },
+        }
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("src.core.webapp.run_scenario", fake_run_scenario)
+
+    app = create_app(config_path=str(config_path))
+    with TestClient(app) as client:
+        start = client.post("/api/session", json={"record_id": "row-1"})
+        assert start.status_code == 200
+        session_id = start.json()["session_id"]
+
+        response = client.post(
+            f"/api/session/{session_id}/ask",
+            json={"question": "Update employee count"},
+        )
+        assert response.status_code == 202
+        ticket_id = response.json()["ticket_id"]
+
+        poll = None
+        for _ in range(10):
+            poll = client.get(f"/api/tickets/{ticket_id}")
+            if poll.status_code == 200:
+                break
+            time.sleep(0.01)
+
+        assert poll is not None and poll.status_code == 200
+
+        record = client.get("/api/dataset/records/row-1")
+        assert record.status_code == 200
+        payload = record.json()
+        assert payload["record"]["EMPLOYEE_COUNT"] == updated_value
 
 
 def test_ask_question_returns_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_dataset: Path) -> None:

@@ -238,6 +238,14 @@ class DatasetService:
         if callable(refresh):
             refresh()
 
+    def refresh_dataset(self) -> None:
+        """Reload the underlying dataset to reflect out-of-band updates."""
+
+        executor = self.executor
+        refresh = getattr(executor, "refresh", None)
+        if callable(refresh):
+            refresh()
+
     def row_count(self) -> int:
         data = getattr(self.executor, "_rows", None)
         return len(data) if data is not None else 0
@@ -317,6 +325,14 @@ class DatasetRowsResponse(BaseModel):
     offset: int
     limit: int
     has_more: bool
+    primary_key: str
+    table_name: str
+
+
+class DatasetRecordResponse(BaseModel):
+    record: dict[str, Any]
+    record_context: dict[str, Any]
+    candidate_urls: list[str]
     primary_key: str
     table_name: str
 
@@ -488,6 +504,26 @@ def create_app(
             offset=offset,
             limit=limit,
             has_more=has_more,
+            primary_key=dataset_service.default_primary_key,
+            table_name=dataset_service.table_name,
+        )
+
+    @app.get("/api/dataset/records/{record_id}", response_model=DatasetRecordResponse)
+    def dataset_record(record_id: str) -> DatasetRecordResponse:
+        LOGGER.debug("Dataset record requested record_id=%s", record_id)
+        record = dataset_service.fetch_record(
+            record_id=record_id,
+            primary_key=dataset_service.default_primary_key,
+            table_name=dataset_service.table_name,
+        )
+        if record is None:
+            raise HTTPException(status_code=404, detail="Record not found")
+        context = build_record_context(record)
+        urls = extract_candidate_urls(record)
+        return DatasetRecordResponse(
+            record=record,
+            record_context=context,
+            candidate_urls=urls,
             primary_key=dataset_service.default_primary_key,
             table_name=dataset_service.table_name,
         )
@@ -698,6 +734,7 @@ def create_app(
             ticket_id,
             broker,
             result_store,
+            dataset_service,
             debug_events,
         )
 
@@ -770,6 +807,7 @@ def _process_question(
     ticket_id: str,
     broker: RealtimeBroker,
     result_store: ResultStore,
+    dataset_service: DatasetService,
     debug_events: bool,
 ) -> None:
     LOGGER.info(
@@ -802,6 +840,13 @@ def _process_question(
             ticket_id,
             result.get("status"),
         )
+
+    update_summary = result.get("update") if isinstance(result, dict) else None
+    if isinstance(update_summary, dict) and update_summary.get("status") == "updated":
+        try:
+            dataset_service.refresh_dataset()
+        except Exception:  # pragma: no cover - defensive logging only
+            LOGGER.exception("Failed to refresh dataset after update for ticket %s", ticket_id)
 
     payload = {
         "result": result,
