@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -87,6 +89,35 @@ class _SchemaAgentStub:
             "columns": ["NEW_FIELD"],
             "migration_path": "schema/migrations/test.sql",
         }
+
+
+class _LLMResponse:
+    def __init__(self, text: str) -> None:
+        self.output = [
+            type(
+                "Block",
+                (),
+                {
+                    "content": [type("Text", (), {"text": text})()],
+                },
+            )()
+        ]
+
+
+@dataclass
+class _LLMStub:
+    response_text: str
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def generate(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        max_output_tokens: int | None = None,
+        tools=None,
+    ) -> Any:  # type: ignore[override]
+        self.calls.append({"messages": messages})
+        return _LLMResponse(self.response_text)
 
 
 def test_runner_executes_scenarios() -> None:
@@ -250,6 +281,92 @@ def test_scraper_receives_candidate_urls() -> None:
     assert missing_facts.get("candidate_urls") == ["https://example.com"]
     context = missing_facts.get("record_context")
     assert context and context.get("BUSINESS_NAME") == "Cafe Example"
+
+
+def test_runner_incorporates_scraper_follow_up() -> None:
+    loader = _ScenarioLoaderStub(
+        scenarios=[
+            {
+                "ticket_id": "T-5",
+                "question": "How many employees?",
+                "record_id": "row-emp",
+            }
+        ]
+    )
+
+    executor = _SQLExecutorStub(
+        dataset={
+            "row-emp": {
+                "BRIZO_ID": "row-emp",
+                "BUSINESS_NAME": "Cafe Example",
+                "LOCATION_CITY": "Florence",
+            }
+        }
+    )
+
+    flagger = _FlaggerStub()
+
+    findings = [
+        {
+            "ticket_id": "T-5",
+            "topic": "general",
+            "query": "Cafe Example employees",
+            "rank": 0,
+            "result": {
+                "url": "https://example.com/report",
+                "snippet": "Cafe Example reports employing 1,200 staff worldwide.",
+            },
+        }
+    ]
+
+    scraper = _ScraperStub(
+        outcome=ScrapeOutcome(
+            tasks=[
+                SearchTask(
+                    query="Cafe Example employees",
+                    topic="general",
+                    description="General search",
+                )
+            ],
+            findings=findings,
+        )
+    )
+
+    updater = _UpdateAgentStub()
+    schema_agent = _SchemaAgentStub()
+
+    llm_payload = json.dumps(
+        {
+            "status": "answered",
+            "answers": {"EMPLOYEE_COUNT": 1200},
+            "sources": {"EMPLOYEE_COUNT": "https://example.com/report"},
+        }
+    )
+
+    llm = _LLMStub(response_text=llm_payload)
+
+    deps = RunnerDependencies(
+        sql_executor=executor,
+        missing_data_flagger=flagger,
+        scraper_agent=scraper,
+        update_agent=updater,
+        schema_agent=schema_agent,
+        gpt_client=llm,
+    )
+
+    runner = Runner(scenario_loader=loader, dependencies=deps)
+
+    result = runner.execute(profile="dev")[0]
+
+    assert result["status"] == "answered"
+    assert result["answers"] == {"EMPLOYEE_COUNT": 1200}
+    assert result.get("answer_origin") == "scraper"
+    assert result.get("previous_status") == "unknown_question"
+    assert result.get("answer_sources") == {"EMPLOYEE_COUNT": "https://example.com/report"}
+    assert result["scraper_findings"] == 1
+    assert updater.summaries and updater.summaries[0]["fields"] == {"EMPLOYEE_COUNT": 1200}
+    assert flagger.calls, "Query agent should flag missing data before follow-up"
+    assert llm.calls, "LLM should be invoked for follow-up synthesis"
 
 
 def test_yaml_scenario_loader_reads_profiles(tmp_path) -> None:

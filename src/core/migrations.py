@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.agents.schema_agent import MigrationWriter
@@ -18,7 +18,7 @@ class FileMigrationWriter(MigrationWriter):
 
     def write_migration(self, *, name: str, statements: Sequence[str]) -> str:  # type: ignore[override]
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         safe_name = name.replace(" ", "_").replace("/", "-")
         filename = f"{timestamp}_{safe_name}.sql"
         target = self.base_dir / filename

@@ -133,7 +133,14 @@ def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> 
     )
 
     if result.get("status") != "answered":
-        _augment_with_scraper(dependencies, ticket_id, question, result)
+        _augment_with_scraper(
+            dependencies,
+            agent,
+            ticket_id,
+            question,
+            record_id,
+            result,
+        )
 
     enrichment_payload = Runner._resolve_enrichment_payload(result, scenario)
     schema_proposal: dict[str, Any] | None = None
@@ -160,7 +167,12 @@ def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> 
 
 
 def _augment_with_scraper(
-    dependencies: RunnerDependencies, ticket_id: str, question: str, result: dict[str, Any]
+    dependencies: RunnerDependencies,
+    agent: QueryAgent,
+    ticket_id: str,
+    question: str,
+    record_id: str,
+    result: dict[str, Any],
 ) -> None:
     assert dependencies.scraper_agent is not None
     missing_facts: dict[str, Any] = {"status": result.get("status")}
@@ -181,6 +193,33 @@ def _augment_with_scraper(
         result["scraper_tasks"] = [task.to_dict() for task in outcome.tasks]
     if outcome.findings:
         result["scraper_findings"] = len(outcome.findings)
+
+        record_context = result.get("record_context")
+        follow_up = agent.incorporate_scraper_findings(
+            ticket_id=ticket_id,
+            question=question,
+            record_id=record_id,
+            findings=outcome.findings,
+            record_context=record_context if isinstance(record_context, dict) else None,
+        )
+
+        if follow_up:
+            previous_status = result.get("status")
+            if previous_status:
+                result.setdefault("previous_status", previous_status)
+            result["status"] = follow_up.get("status", "answered")
+            result["answers"] = follow_up.get("answers", {})
+            if follow_up.get("candidate_urls"):
+                result["candidate_urls"] = follow_up["candidate_urls"]
+            if follow_up.get("record_context"):
+                result["record_context"] = follow_up["record_context"]
+            if follow_up.get("answer_sources"):
+                result["answer_sources"] = follow_up["answer_sources"]
+            if follow_up.get("answer_notes"):
+                result["answer_notes"] = follow_up["answer_notes"]
+            if follow_up.get("answer_origin"):
+                result["answer_origin"] = follow_up["answer_origin"]
+            result.pop("missing_columns", None)
 
 
 def _validate_dependencies(dependencies: RunnerDependencies) -> None:

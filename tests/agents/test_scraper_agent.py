@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -98,10 +99,14 @@ def test_execute_plan_persists_findings(tmp_path: Path) -> None:
     )
 
     assert outcome.findings
-    evidence_file = tmp_path / "T-1.jsonl"
-    assert evidence_file.exists()
-    content = evidence_file.read_text(encoding="utf-8").strip()
-    assert "https://example.com" in content
+    files = sorted(tmp_path.glob("*-T-1.jsonl"))
+    assert len(files) == 1
+    evidence_file = files[0]
+    lines = evidence_file.read_text(encoding="utf-8").splitlines()
+    assert lines
+    first_entry = json.loads(lines[0])
+    assert first_entry["result"]["url"] == "https://example.com"
+    assert "timestamp" in first_entry
     events = [event for _, event, _ in logger.events]
     assert "scrape_plan_created" in events
     assert "scrape_task_started" in events

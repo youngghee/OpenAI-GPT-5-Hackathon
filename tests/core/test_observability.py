@@ -18,8 +18,10 @@ def test_jsonl_query_logger_appends_events(tmp_path: Path) -> None:
 
     logger.log_event("T-1", "question_received", {"record_id": "abc"})
 
-    target = tmp_path / "T-1.jsonl"
-    assert target.exists()
+    files = sorted(tmp_path.glob("*.jsonl"))
+    assert len(files) == 1
+    target = files[0]
+    assert target.name.endswith("-T-1.jsonl")
     events = _load_events(target)
     assert events[0]["event"] == "question_received"
     assert events[0]["record_id"] == "abc"
@@ -32,7 +34,9 @@ def test_jsonl_scraper_logger_appends_events(tmp_path: Path) -> None:
     logger.log_event("T-2", "scrape_task_started", {"topic": "BUSINESS_NAME"})
     logger.log_event("T-2", "scrape_task_completed", {"result_count": 3})
 
-    target = tmp_path / "T-2.jsonl"
+    files = sorted(tmp_path.glob("*-T-2.jsonl"))
+    assert len(files) == 1
+    target = files[0]
     events = _load_events(target)
     assert len(events) == 2
     assert events[0]["event"] == "scrape_task_started"

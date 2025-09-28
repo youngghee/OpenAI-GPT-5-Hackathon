@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -156,8 +158,9 @@ class _LLMResponse:
 
 
 class _LLMClientStub:
-    def __init__(self) -> None:
+    def __init__(self, response_text: str = '{"BUSINESS_NAME": "Example LLC"}') -> None:
         self.calls: list[dict[str, Any]] = []
+        self.response_text = response_text
 
     def generate(
         self,
@@ -168,7 +171,7 @@ class _LLMClientStub:
         response_format: dict[str, Any] | None = None,
     ) -> Any:  # type: ignore[override]
         self.calls.append({"messages": messages})
-        return _LLMResponse('{"BUSINESS_NAME": "Example LLC"}')
+        return _LLMResponse(self.response_text)
 
 
 def test_query_agent_uses_llm_when_columns_missing() -> None:
@@ -189,3 +192,56 @@ def test_query_agent_uses_llm_when_columns_missing() -> None:
     assert result["answers"] == {"BUSINESS_NAME": "Example LLC"}
     assert not flagger.calls
     assert llm.calls
+
+
+def test_query_agent_incorporates_scraper_findings_with_llm() -> None:
+    rows = [
+        {
+            "BRIZO_ID": "abc",
+            "BUSINESS_NAME": "Cafe Example",
+        }
+    ]
+    follow_up_payload = json.dumps(
+        {
+            "status": "answered",
+            "answers": {"EMPLOYEE_COUNT": 1200},
+            "sources": {"EMPLOYEE_COUNT": "https://example.com/report"},
+            "notes": "Derived from the annual report."
+        }
+    )
+    llm = _LLMClientStub(response_text=follow_up_payload)
+    agent, _, _ = _make_agent(rows, llm_client=llm)
+
+    initial = agent.answer_question(
+        ticket_id="T-follow",
+        question="How many employees?",
+        record_id="abc",
+    )
+
+    assert initial["status"] == "unknown_question"
+
+    findings = [
+        {
+            "topic": "general",
+            "query": "Cafe Example employees",
+            "result": {
+                "url": "https://example.com/report",
+                "snippet": "Cafe Example employs 1,200 team members worldwide.",
+            },
+        }
+    ]
+
+    follow_up = agent.incorporate_scraper_findings(
+        ticket_id="T-follow",
+        question="How many employees?",
+        record_id="abc",
+        findings=findings,
+        record_context=initial.get("record_context"),
+    )
+
+    assert follow_up is not None
+    assert follow_up["status"] == "answered"
+    assert follow_up["answers"] == {"EMPLOYEE_COUNT": 1200}
+    assert follow_up["answer_origin"] == "scraper"
+    assert follow_up["answer_sources"] == {"EMPLOYEE_COUNT": "https://example.com/report"}
+    assert "Derived" in follow_up["answer_notes"]

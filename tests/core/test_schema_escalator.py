@@ -16,7 +16,9 @@ def test_jsonl_schema_escalator_appends(tmp_path: Path) -> None:
         rationale={"unknown_fields": {"NEW_FIELD": "value"}},
     )
 
-    output = tmp_path / "T-1.jsonl"
-    assert output.exists()
+    files = sorted(tmp_path.glob("*-T-1.jsonl"))
+    assert len(files) == 1
+    output = files[0]
     payload = json.loads(output.read_text(encoding="utf-8").strip())
     assert payload["rationale"]["unknown_fields"]["NEW_FIELD"] == "value"
+    assert "timestamp" in payload

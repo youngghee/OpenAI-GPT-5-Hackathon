@@ -17,8 +17,10 @@ def test_jsonl_flagger_writes_payload(tmp_path: Path) -> None:
         facts={"reason": "missing_values"},
     )
 
-    output_file = tmp_path / "T-1.jsonl"
-    assert output_file.exists()
+    files = sorted(tmp_path.glob("*-T-1.jsonl"))
+    assert len(files) == 1
+    output_file = files[0]
     content = output_file.read_text(encoding="utf-8").strip()
     payload = json.loads(content)
     assert payload["facts"]["reason"] == "missing_values"
+    assert "timestamp" in payload

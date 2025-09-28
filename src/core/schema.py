@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from src.agents.update_agent import SchemaEscalator
+from src.core.logging_utils import resolve_log_path, utc_now_iso
 
 
 @dataclass(slots=True)
@@ -17,8 +18,12 @@ class JSONLSchemaEscalator(SchemaEscalator):
     base_dir: Path
 
     def escalate(self, ticket_id: str, rationale: dict[str, Any]) -> None:  # type: ignore[override]
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-        target = self.base_dir / f"{ticket_id}.jsonl"
+        payload = {
+            "ticket_id": ticket_id,
+            "rationale": rationale,
+            "timestamp": utc_now_iso(),
+        }
+        target = resolve_log_path(self.base_dir, ticket_id, payload["timestamp"])
         with target.open("a", encoding="utf-8") as handle:
-            json.dump({"ticket_id": ticket_id, "rationale": rationale}, handle, ensure_ascii=False)
+            json.dump(payload, handle, ensure_ascii=False)
             handle.write("\n")

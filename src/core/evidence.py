@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from src.core.logging_utils import resolve_log_path, utc_now_iso
+
 
 class EvidenceSink(Protocol):
     """Destination that accepts normalized evidence payloads."""
@@ -32,10 +34,11 @@ class JSONLEvidenceSink(EvidenceSink):
     def append(
         self, ticket_id: str, payload: dict[str, Any]
     ) -> None:  # pragma: no cover - exercised via bulk
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-        target = self.base_dir / f"{ticket_id}.jsonl"
+        prepared = dict(payload)
+        prepared.setdefault("timestamp", utc_now_iso())
+        target = resolve_log_path(self.base_dir, ticket_id, prepared["timestamp"])
         with target.open("a", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False)
+            json.dump(prepared, handle, ensure_ascii=False)
             handle.write("\n")
 
     def bulk_append(self, ticket_id: str, payloads: Iterable[dict[str, Any]]) -> None:

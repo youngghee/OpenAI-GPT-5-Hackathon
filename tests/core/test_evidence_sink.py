@@ -19,9 +19,11 @@ def test_jsonl_evidence_sink_appends_lines(tmp_path: Path) -> None:
         ],
     )
 
-    output_file = tmp_path / "T-1.jsonl"
-    assert output_file.exists()
+    files = sorted(tmp_path.glob("*-T-1.jsonl"))
+    assert len(files) == 1
+    output_file = files[0]
     lines = [json.loads(line) for line in output_file.read_text(encoding="utf-8").splitlines()]
     expected_lines = 2
     assert len(lines) == expected_lines
     assert lines[0]["result"]["url"] == "https://example.com"
+    assert all("timestamp" in entry for entry in lines)
