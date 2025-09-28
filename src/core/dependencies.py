@@ -22,6 +22,7 @@ from src.core.observability import (
 )
 from src.core.missing_data import JSONLMissingDataFlagger
 from src.core.schema import JSONLSchemaEscalator
+from src.integrations.csv_crm_client import CsvCRMClient
 from src.integrations.csv_sql_executor import CsvSQLExecutor
 from src.integrations.in_memory_sql_executor import InMemorySQLExecutor
 from src.integrations.openai_models import GPTResponseClient, OpenAIClientFactory
@@ -50,8 +51,10 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
     if settings.csv_source is not None:
         path = settings.csv_source.resolve_path()
         executor = CsvSQLExecutor(csv_path=path, table_name=settings.csv_source.table_name)
+        primary_key = "BRIZO_ID"
     else:
         executor = InMemorySQLExecutor()
+        primary_key = "BRIZO_ID"
 
     scrapes_dir = _resolve_scrapes_dir(settings)
     flagger = JSONLMissingDataFlagger(base_dir=scrapes_dir)
@@ -70,7 +73,10 @@ def build_dependencies(settings: Settings) -> RunnerDependencies:
     schema_escalator = JSONLSchemaEscalator(base_dir=schema_dir)
     migrations_dir = _resolve_migrations_dir(settings)
     migration_writer = FileMigrationWriter(base_dir=migrations_dir)
-    crm_client = InMemoryCRMClient()
+    if isinstance(executor, CsvSQLExecutor):
+        crm_client = CsvCRMClient(executor=executor, primary_key=primary_key)
+    else:
+        crm_client = InMemoryCRMClient()
     column_catalog = _detect_dataset_columns(executor)
     update_agent = UpdateAgent(
         crm_client=crm_client,

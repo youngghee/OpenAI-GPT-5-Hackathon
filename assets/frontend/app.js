@@ -509,7 +509,16 @@ function renderResult(result) {
     Array.isArray(result.schema_proposal.columns) &&
     result.schema_proposal.columns.length
   ) {
-    schemaModal.setProposal(result.schema_proposal);
+    const unmatchedFacts =
+      result.update &&
+      result.update.escalated &&
+      Array.isArray(result.update.escalated.unmatched_facts)
+        ? result.update.escalated.unmatched_facts
+        : [];
+    schemaModal.setProposal(result.schema_proposal, {
+      recordId: state.session.recordId,
+      unmatchedFacts,
+    });
     const wrapper = document.createElement("div");
     wrapper.className = "schema-proposal-summary";
 
@@ -626,6 +635,7 @@ function createSchemaModal() {
   const closeButtons = root.querySelectorAll('[data-action="close"]');
   const applyButton = root.querySelector('[data-action="apply-schema"]');
   let currentProposal = null;
+  let currentContext = { recordId: null, assignments: [] };
   const defaultApplyLabel = applyButton ? applyButton.textContent : "Apply schema changes";
 
   const close = () => {
@@ -735,13 +745,14 @@ function createSchemaModal() {
     }
   };
 
-  const setProposal = (proposal) => {
+  const setProposal = (proposal, context = {}) => {
     if (
       !proposal ||
       !Array.isArray(proposal.columns) ||
       proposal.columns.length === 0
     ) {
       currentProposal = null;
+      currentContext = { recordId: null, assignments: [] };
       if (!root.classList.contains("hidden")) {
         close();
       }
@@ -752,6 +763,13 @@ function createSchemaModal() {
 
     currentProposal = {
       ...proposal,
+    };
+    const unmatchedFacts = Array.isArray(context.unmatchedFacts)
+      ? context.unmatchedFacts
+      : [];
+    currentContext = {
+      recordId: context.recordId || null,
+      assignments: buildAssignments(currentProposal.columns, unmatchedFacts),
     };
     setApplyState(false);
     renderProposal();
@@ -783,6 +801,9 @@ function createSchemaModal() {
       table_name: currentProposal.table_name || state.dataset.tableName,
       notes: currentProposal.notes || null,
       migration_name: currentProposal.migration_name || undefined,
+      record_id: currentContext.recordId || state.session.recordId,
+      primary_key: state.dataset.primaryKey,
+      row_assignments: currentContext.assignments || [],
     };
 
     setApplyState(true);
@@ -803,6 +824,10 @@ function createSchemaModal() {
           ? `Schema migration written to ${path}.`
           : "Schema changes applied."
       );
+      await Promise.all([
+        loadDatasetMetadata(),
+        loadDatasetRows(),
+      ]);
       close();
     } catch (error) {
       console.error("Failed to apply schema proposal", error);
@@ -834,4 +859,40 @@ function createSchemaModal() {
       setProposal(null);
     },
   };
+}
+
+function buildAssignments(columns, unmatchedFacts) {
+  if (!Array.isArray(columns) || !Array.isArray(unmatchedFacts)) {
+    return [];
+  }
+
+  const lookup = new Map();
+  columns.forEach((column) => {
+    if (!column || !column.name) return;
+    lookup.set(normaliseConcept(column.name), column.name);
+  });
+
+  const assignments = [];
+  unmatchedFacts.forEach((fact) => {
+    if (!fact || typeof fact !== "object") return;
+    const concept = typeof fact.concept === "string" && fact.concept
+      ? fact.concept
+      : typeof fact.column === "string"
+        ? fact.column
+        : null;
+    if (!concept) return;
+    const value = fact.value;
+    const columnName = lookup.get(normaliseConcept(concept));
+    if (!columnName) return;
+    assignments.push({ column: columnName, value });
+  });
+
+  return assignments;
+}
+
+function normaliseConcept(raw) {
+  return String(raw)
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_");
 }

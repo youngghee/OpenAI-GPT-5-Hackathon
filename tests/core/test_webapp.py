@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -197,6 +198,11 @@ def test_apply_schema_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
             "migration_statements": [
                 "ALTER TABLE dataset ADD COLUMN employee_count INTEGER NOT NULL"
             ],
+            "record_id": "row-1",
+            "primary_key": "BRIZO_ID",
+            "row_assignments": [
+                {"column": "EMPLOYEE_COUNT", "value": 1200}
+            ],
         }
         response = client.post("/api/schema/apply", json=payload)
         assert response.status_code == 200
@@ -206,3 +212,14 @@ def test_apply_schema_endpoint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
         assert path.exists()
         content = path.read_text(encoding="utf-8")
         assert "employee_count" in content
+
+        executor = client.app.state.dataset_service.executor
+        assert "employee_count" in executor.columns
+
+        csv_path = Path(os.environ["CSV_DATA_PATH"])
+        csv_content = csv_path.read_text(encoding="utf-8")
+        assert "employee_count" in csv_content.splitlines()[0]
+        assert any(
+            line.endswith(",1200") or ",1200," in line
+            for line in csv_content.splitlines()[1:]
+        )

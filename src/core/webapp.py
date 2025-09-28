@@ -21,6 +21,7 @@ from src.core.config import Settings, load_settings
 from src.core.dependencies import RunnerDependencies, build_dependencies
 from src.core.record_utils import build_record_context, extract_candidate_urls
 from src.core.migrations import FileMigrationWriter
+from src.integrations.csv_sql_executor import CsvSQLExecutor
 from src.core.runner import run_scenario
 from src.core.chat import describe_query_event, describe_scraper_event
 
@@ -57,6 +58,11 @@ class SchemaColumnPayload(BaseModel):
     description: str | None = None
 
 
+class SchemaRowAssignment(BaseModel):
+    column: str = Field(..., min_length=1)
+    value: Any | None = None
+
+
 class ApplySchemaRequest(BaseModel):
     ticket_id: str = Field(..., min_length=1)
     columns: list[SchemaColumnPayload] = Field(default_factory=list)
@@ -64,6 +70,9 @@ class ApplySchemaRequest(BaseModel):
     table_name: str | None = None
     notes: str | None = None
     migration_name: str | None = None
+    record_id: str | None = None
+    primary_key: str | None = None
+    row_assignments: list[SchemaRowAssignment] = Field(default_factory=list)
 
 
 class ApplySchemaResponse(BaseModel):
@@ -219,6 +228,15 @@ class DatasetService:
             columns = getattr(executor, "columns", None)
             self._columns = list(columns) if columns else []
         return list(self._columns)
+
+    def refresh_columns(self) -> None:
+        """Clear cached column metadata and reload executor state."""
+
+        self._columns = None
+        executor = self.executor
+        refresh = getattr(executor, "refresh", None)
+        if callable(refresh):
+            refresh()
 
     def row_count(self) -> int:
         data = getattr(self.executor, "_rows", None)
@@ -506,6 +524,50 @@ def create_app(
         except Exception as exc:  # pragma: no cover - defensive
             LOGGER.exception("Failed to write migration for ticket_id=%s", payload.ticket_id)
             raise HTTPException(status_code=500, detail="Failed to persist migration") from exc
+
+        if isinstance(dataset_service.executor, CsvSQLExecutor):
+            executor: CsvSQLExecutor = dataset_service.executor
+            for column in columns:
+                if not column.name:
+                    continue
+                try:
+                    executor.add_column(column.name)
+                except Exception as exc:  # pragma: no cover - defensive
+                    LOGGER.warning(
+                        "Failed to add column '%s' to CSV: %s", column.name, exc
+                    )
+            dataset_service.refresh_columns()
+
+            if payload.record_id and payload.row_assignments:
+                primary_key = payload.primary_key or dataset_service.default_primary_key
+                updates: dict[str, Any] = {}
+                for assignment in payload.row_assignments:
+                    try:
+                        column_name = executor.resolve_column(assignment.column)
+                    except KeyError:
+                        LOGGER.warning(
+                            "Skipping unknown column '%s' when applying row update",
+                            assignment.column,
+                        )
+                        continue
+                    updates[column_name] = assignment.value
+
+                if updates:
+                    try:
+                        applied = executor.apply_update(
+                            primary_key=primary_key,
+                            record_id=payload.record_id,
+                            updates=updates,
+                        )
+                        if not applied:
+                            LOGGER.warning(
+                                "Record %s not found when applying row assignments",
+                                payload.record_id,
+                            )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        LOGGER.exception(
+                            "Failed to apply row assignments for record %s", payload.record_id
+                        )
 
         LOGGER.info(
             "Schema migration applied ticket_id=%s path=%s statements=%s",

@@ -38,19 +38,12 @@ class CsvSQLExecutor:
     table_name: str = "dataset"
     _rows: list[dict[str, Any]] = field(init=False, default_factory=list)
     _field_map: dict[str, str] = field(init=False, default_factory=dict)
+    _fieldnames: list[str] = field(init=False, default_factory=list)
+    _path: Path = field(init=False)
 
     def __post_init__(self) -> None:
-        path = Path(self.csv_path).expanduser()
-        if not path.exists():
-            raise FileNotFoundError(f"CSV file not found: {path}")
-
-        with path.open("r", encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
-            if reader.fieldnames is None:
-                raise ValueError("CSV file must include a header row")
-
-            self._field_map = {name.lower(): name for name in reader.fieldnames}
-            self._rows = list(reader)
+        self._path = Path(self.csv_path).expanduser()
+        self.refresh()
 
     def run(self, statement: str) -> list[dict[str, Any]]:
         match = _SELECT_RE.match(statement)
@@ -101,4 +94,82 @@ class CsvSQLExecutor:
     def columns(self) -> list[str]:
         """Return the original CSV column names."""
 
-        return list(self._field_map.values())
+        return list(self._fieldnames)
+
+    def refresh(self) -> None:
+        """Reload the CSV contents from disk."""
+
+        path = self._path
+        if not path.exists():
+            raise FileNotFoundError(f"CSV file not found: {path}")
+
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames is None:
+                raise ValueError("CSV file must include a header row")
+            fieldnames = list(reader.fieldnames)
+            self._fieldnames = fieldnames
+            self._field_map = {name.lower(): name for name in fieldnames}
+            self._rows = [dict(row) for row in reader]
+
+    def resolve_column(self, name: str) -> str:
+        """Return the canonical column name for *name*."""
+
+        return self._resolve_field(name)
+
+    def apply_update(self, primary_key: str, record_id: str, updates: dict[str, Any]) -> bool:
+        """Update a record in-memory and persist the CSV file."""
+
+        if not updates:
+            return False
+
+        pk = self._resolve_field(primary_key)
+        target_row: dict[str, Any] | None = None
+        for row in self._rows:
+            value = row.get(pk)
+            if value is not None and str(value).strip() == str(record_id):
+                target_row = row
+                break
+
+        if target_row is None:
+            return False
+
+        for column, value in updates.items():
+            resolved = self._resolve_field(column)
+            target_row[resolved] = "" if value is None else str(value)
+
+        self._write_rows()
+        self.refresh()
+        return True
+
+    def _write_rows(self) -> None:
+        with self._path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=self._fieldnames)
+            writer.writeheader()
+            for row in self._rows:
+                writer.writerow(
+                    {
+                        field: "" if row.get(field) is None else str(row.get(field)).strip()
+                        for field in self._fieldnames
+                    }
+                )
+
+    def add_column(self, name: str, default: Any = "") -> None:
+        """Add a column to the CSV dataset if it does not already exist."""
+
+        if not name:
+            raise ValueError("Column name must be provided")
+
+        canonical = str(name)
+        if canonical in self._fieldnames:
+            return
+
+        self._fieldnames.append(canonical)
+        self._field_map[canonical.lower()] = canonical
+
+        default_value = "" if default is None else str(default)
+        for row in self._rows:
+            row.setdefault(canonical, default_value)
+
+        self._write_rows()
+        self.refresh()
