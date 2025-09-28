@@ -155,6 +155,28 @@ class ChatCLI:
                     name = column.get("name")
                     data_type = column.get("data_type")
                     self.output_func(f"  - {name}: {data_type}")
+            prompt = schema_proposal.get("backfill_prompt")
+            if isinstance(prompt, str) and prompt.strip():
+                self.output_func("  Backfill prompt:")
+                for line in prompt.strip().splitlines():
+                    self.output_func(f"    {line}")
+            recipes = schema_proposal.get("search_recipes")
+            if isinstance(recipes, list) and recipes:
+                self.output_func("  Successful searches:")
+                for idx, recipe in enumerate(recipes, start=1):
+                    if not isinstance(recipe, dict):
+                        continue
+                    topic = recipe.get("topic") or ""
+                    query = recipe.get("query") or ""
+                    description = recipe.get("description") or ""
+                    parts = [f"#{idx}"]
+                    if topic:
+                        parts.append(f"Topic: {topic}")
+                    if query:
+                        parts.append(f"Query: {query}")
+                    if description:
+                        parts.append(f"Use: {description}")
+                    self.output_func("    " + " | ".join(parts))
 
         self.output_func("")
 

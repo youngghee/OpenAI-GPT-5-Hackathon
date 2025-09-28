@@ -534,6 +534,15 @@ function renderResult(result) {
       wrapper.appendChild(path);
     }
 
+    if (
+      typeof result.schema_proposal.backfill_prompt === "string" &&
+      result.schema_proposal.backfill_prompt.trim()
+    ) {
+      const note = document.createElement("p");
+      note.textContent = "Backfill instructions available.";
+      wrapper.appendChild(note);
+    }
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary";
@@ -792,6 +801,51 @@ function createSchemaModal() {
 
     if (meta.childElementCount) {
       body.appendChild(meta);
+    }
+
+    const promptText =
+      typeof currentProposal.backfill_prompt === "string"
+        ? currentProposal.backfill_prompt.trim()
+        : "";
+    if (promptText) {
+      const heading = document.createElement("h3");
+      heading.textContent = "Backfill Prompt";
+      heading.className = "schema-section-heading";
+      body.appendChild(heading);
+
+      const pre = document.createElement("pre");
+      pre.className = "schema-backfill-prompt";
+      pre.textContent = promptText;
+      body.appendChild(pre);
+    }
+
+    if (
+      Array.isArray(currentProposal.search_recipes) &&
+      currentProposal.search_recipes.length
+    ) {
+      const recipeHeading = document.createElement("h3");
+      recipeHeading.textContent = "Successful Searches";
+      recipeHeading.className = "schema-section-heading";
+      body.appendChild(recipeHeading);
+
+      const list = document.createElement("ul");
+      list.className = "schema-search-list";
+      currentProposal.search_recipes.forEach((entry, index) => {
+        if (!entry || typeof entry !== "object") return;
+        const item = document.createElement("li");
+        const topic = entry.topic ? String(entry.topic) : "";
+        const query = entry.query ? String(entry.query) : "";
+        const description = entry.description ? String(entry.description) : "";
+        const count = Number.isFinite(entry.result_count) ? entry.result_count : null;
+        const parts = [`#${index + 1}`];
+        if (topic) parts.push(`Topic: ${topic}`);
+        if (query) parts.push(`Query: ${query}`);
+        if (description) parts.push(`Use: ${description}`);
+        if (count !== null) parts.push(`Results: ${count}`);
+        item.textContent = parts.join(" | ");
+        list.appendChild(item);
+      });
+      body.appendChild(list);
     }
 
     const columns = Array.isArray(currentProposal.columns) ? currentProposal.columns : [];

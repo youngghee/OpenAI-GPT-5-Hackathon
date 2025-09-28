@@ -186,6 +186,12 @@ def run_scenario(dependencies: RunnerDependencies, scenario: dict[str, Any]) -> 
         result.setdefault("update", {"status": "skipped", "reason": "dataset_only_answer"})
 
     if schema_proposal:
+        backfill_prompt = result.get("scraper_backfill_prompt")
+        if isinstance(backfill_prompt, str) and backfill_prompt.strip():
+            schema_proposal.setdefault("backfill_prompt", backfill_prompt)
+        successes = result.get("scraper_successes")
+        if isinstance(successes, list) and successes:
+            schema_proposal.setdefault("search_recipes", successes)
         result["schema_proposal"] = schema_proposal
 
     return result
@@ -218,6 +224,10 @@ def _augment_with_scraper(
         result["scraper_tasks"] = [task.to_dict() for task in outcome.tasks]
     if outcome.findings:
         result["scraper_findings"] = len(outcome.findings)
+    if outcome.successful_searches:
+        result["scraper_successes"] = outcome.successful_searches
+    if outcome.backfill_prompt:
+        result["scraper_backfill_prompt"] = outcome.backfill_prompt
 
         record_context = result.get("record_context")
         follow_up = agent.incorporate_scraper_findings(

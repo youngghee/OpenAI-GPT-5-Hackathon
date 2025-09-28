@@ -342,6 +342,15 @@ def test_runner_incorporates_scraper_follow_up() -> None:
                 )
             ],
             findings=findings,
+            successful_searches=[
+                {
+                    "topic": "general",
+                    "query": "Cafe Example employees",
+                    "description": "General search",
+                    "result_count": 1,
+                }
+            ],
+            backfill_prompt="Search for 'Cafe Example employees' to refresh employee_count.",
         )
     )
 
@@ -385,6 +394,7 @@ def test_runner_incorporates_scraper_follow_up() -> None:
     assert result.get("fact_sources") == {"employee_count": "https://example.com/report"}
     assert result["scraper_findings"] == 1
     assert updater.summaries and updater.summaries[0]["facts"][0]["value"] == 1200
+    assert result.get("scraper_backfill_prompt") == "Search for 'Cafe Example employees' to refresh employee_count."
     assert flagger.calls, "Query agent should flag missing data before follow-up"
     assert llm.calls, "LLM should be invoked for follow-up synthesis"
 
@@ -408,3 +418,68 @@ def test_yaml_scenario_loader_reads_profiles(tmp_path) -> None:
             "record_id": "row-1",
         }
     ]
+
+
+def test_schema_proposal_includes_backfill_prompt_and_recipes() -> None:
+    loader = _ScenarioLoaderStub(
+        scenarios=[
+            {
+                "ticket_id": "T-6",
+                "question": "How many employees?",
+                "record_id": "row-backfill",
+                "enriched_fields": {"NEW_HEADCOUNT": 880},
+            }
+        ]
+    )
+
+    executor = _SQLExecutorStub(
+        dataset={
+            "row-backfill": {
+                "BRIZO_ID": "row-backfill",
+                "BUSINESS_NAME": "Cafe Example",
+            }
+        }
+    )
+    flagger = _FlaggerStub()
+    backfill_prompt = "Reuse 'Cafe Example employees' to populate NEW_HEADCOUNT."
+    scraper = _ScraperStub(
+        outcome=ScrapeOutcome(
+            tasks=[
+                SearchTask(
+                    query="Cafe Example employees",
+                    topic="general",
+                    description="General search",
+                )
+            ],
+            findings=[{"url": "https://example.com/report"}],
+            successful_searches=[
+                {
+                    "topic": "general",
+                    "query": "Cafe Example employees",
+                    "description": "General search",
+                    "result_count": 1,
+                }
+            ],
+            backfill_prompt=backfill_prompt,
+        )
+    )
+    updater = _UpdateAgentStub()
+    schema_agent = _SchemaAgentStub()
+    deps = RunnerDependencies(
+        sql_executor=executor,
+        missing_data_flagger=flagger,
+        scraper_agent=scraper,
+        update_agent=updater,
+        schema_agent=schema_agent,
+    )
+
+    runner = Runner(scenario_loader=loader, dependencies=deps)
+
+    result = runner.execute(profile="dev")[0]
+
+    schema = result.get("schema_proposal")
+    assert schema
+    assert schema.get("backfill_prompt") == backfill_prompt
+    recipes = schema.get("search_recipes")
+    assert isinstance(recipes, list) and recipes
+    assert recipes[0]["query"] == "Cafe Example employees"

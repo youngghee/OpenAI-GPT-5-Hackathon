@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -52,6 +52,8 @@ class ScrapeOutcome:
 
     tasks: list[SearchTask]
     findings: list[dict[str, Any]]
+    successful_searches: list[dict[str, Any]] = field(default_factory=list)
+    backfill_prompt: str | None = None
 
 
 @dataclass
@@ -154,6 +156,7 @@ class ScraperAgent:
 
         tasks = self.plan_research(question, missing_facts, ticket_id=ticket_id)
         findings: list[dict[str, Any]] = []
+        successful: list[dict[str, Any]] = []
 
         for task in tasks:
             self._log_event(
@@ -170,6 +173,15 @@ class ScraperAgent:
                         "query": task.query,
                         "rank": rank,
                         "result": result,
+                    }
+                )
+            if results:
+                successful.append(
+                    {
+                        "topic": task.topic,
+                        "query": task.query,
+                        "description": task.description,
+                        "result_count": len(results),
                     }
                 )
             self._log_event(
@@ -190,8 +202,24 @@ class ScraperAgent:
                 event="scrape_no_findings",
                 payload={"question": question, "task_count": len(tasks)},
             )
+        missing_columns: list[str] = []
+        if isinstance(missing_facts, dict):
+            raw_missing = missing_facts.get("missing_columns")
+            if isinstance(raw_missing, list):
+                missing_columns = [str(item) for item in raw_missing if item]
 
-        return ScrapeOutcome(tasks=tasks, findings=findings)
+        backfill_prompt = self._compose_backfill_prompt(
+            question=question,
+            missing_columns=missing_columns,
+            successful=successful,
+        )
+
+        return ScrapeOutcome(
+            tasks=tasks,
+            findings=findings,
+            successful_searches=successful,
+            backfill_prompt=backfill_prompt,
+        )
 
     def aggregate(self, ticket_id: str, findings: Sequence[dict[str, Any]]) -> None:
         """Persist normalized evidence produced by scraper subagents."""
@@ -389,3 +417,57 @@ class ScraperAgent:
         for placeholder, actual in replacements.items():
             result = result.replace(placeholder, actual)
         return result
+
+    @staticmethod
+    def _compose_backfill_prompt(
+        *,
+        question: str,
+        missing_columns: list[str],
+        successful: list[dict[str, Any]],
+    ) -> str | None:
+        if not successful:
+            return None
+
+        normalized_columns = [
+            column.strip()
+            for column in missing_columns
+            if isinstance(column, str) and column.strip()
+        ]
+        if normalized_columns:
+            focus_text = ", ".join(sorted({col for col in normalized_columns}))
+            target_clause = f"to capture {focus_text}"
+        else:
+            target_clause = "to capture the missing information"
+
+        question_text = question.strip() if question and question.strip() else "the stakeholder's request"
+
+        lines = [
+            "You are backfilling newly accepted schema fields across the dataset.",
+            f"Reuse the proven searches below {target_clause} when answering '{question_text}'.",
+            "For each remaining record:",
+            "1. Run the recommended searches, adjusting company/location terms as needed.",
+            "2. Pull values from authoritative sources returned by the searches.",
+            "3. Capture the source URL for auditing and note any confidence caveats.",
+            "Successful searches:",
+        ]
+
+        for index, entry in enumerate(successful, start=1):
+            if not isinstance(entry, dict):
+                continue
+            topic = str(entry.get("topic", "")).strip()
+            query = str(entry.get("query", "")).strip()
+            description = str(entry.get("description", "")).strip()
+            result_count = entry.get("result_count")
+            summary = f"[{index}]"
+            if topic:
+                summary += f" Topic: {topic}"
+            if query:
+                summary += f" | Query: {query}"
+            if description:
+                summary += f" | Use: {description}"
+            if isinstance(result_count, int):
+                summary += f" (returned {result_count} result{'s' if result_count != 1 else ''})"
+            lines.append(summary)
+
+        lines.append("Document findings in the evidence log before importing into the CRM.")
+        return "\n".join(lines)

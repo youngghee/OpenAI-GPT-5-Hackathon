@@ -99,6 +99,12 @@ def test_execute_plan_persists_findings(tmp_path: Path) -> None:
     )
 
     assert outcome.findings
+    assert outcome.successful_searches
+    first_success = outcome.successful_searches[0]
+    assert first_success["query"] == query
+    assert first_success["topic"] == "BUSINESS_NAME"
+    assert outcome.backfill_prompt
+    assert "business name" in outcome.backfill_prompt.lower()
     files = sorted(tmp_path.glob("*-T-1.jsonl"))
     assert len(files) == 1
     evidence_file = files[0]
@@ -130,6 +136,8 @@ def test_execute_plan_logs_when_no_findings() -> None:
     )
 
     assert not outcome.findings
+    assert outcome.successful_searches == []
+    assert outcome.backfill_prompt is None
     events = [event for _, event, _ in logger.events]
     assert "scrape_no_findings" in events
 
