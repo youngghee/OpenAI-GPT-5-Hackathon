@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import logging
 from pathlib import Path
 
 import pytest
@@ -139,3 +140,38 @@ def test_ask_question_returns_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         assert result_payload["result"]["answers"]["BUSINESS_NAME"] == "Cafe Example"
         timeline_messages = [entry["message"] for entry in result_payload["timeline"]]
         assert any("Received question" in message for message in timeline_messages)
+
+
+def test_debug_events_emit_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    sample_dataset: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config_path = _write_config(tmp_path)
+    monkeypatch.setenv("CSV_DATA_PATH", str(sample_dataset))
+
+    app = create_app(config_path=str(config_path), debug_events=True)
+    with TestClient(app) as client, caplog.at_level(logging.INFO):
+        start = client.post("/api/session", json={"record_id": "row-1"})
+        assert start.status_code == 200
+        session_id = start.json()["session_id"]
+
+        response = client.post(
+            f"/api/session/{session_id}/ask",
+            json={"question": "How many employees?"},
+        )
+        assert response.status_code == 202
+        ticket_id = response.json()["ticket_id"]
+
+        poll = None
+        for _ in range(5):
+            poll = client.get(f"/api/tickets/{ticket_id}")
+            if poll.status_code == 200:
+                break
+            time.sleep(0.01)
+
+    assert poll is not None and poll.status_code == 200, "ticket did not complete in time"
+
+    logged_messages = "\n".join(record.message for record in caplog.records)
+    assert "Timeline[" in logged_messages

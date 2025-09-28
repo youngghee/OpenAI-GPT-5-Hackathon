@@ -278,12 +278,15 @@ class TimelineRecorder:
     events: list[TimelineEntry]
     broker: RealtimeBroker | None = None
     ticket_id: str | None = None
+    debug_logging: bool = False
 
     def add(self, source: str, message: str) -> None:
         if not message:
             return
         entry = TimelineEntry(source=source, message=message)
         self.events.append(entry)
+        if self.debug_logging:
+            LOGGER.info("Timeline[%s] %s", source, message)
         if self.broker is not None and self.ticket_id is not None:
             self.broker.publish_timeline(self.ticket_id, entry)
 
@@ -367,7 +370,11 @@ class TimelineSchemaAgent:
         return result
 
 
-def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
+def create_app(
+    config_path: str = "configs/dev.yaml",
+    *,
+    debug_events: bool = False,
+) -> FastAPI:
     LOGGER.info("Initialising web application with config '%s'", config_path)
     settings = load_settings(config_path)
     dataset_service = DatasetService(settings)
@@ -381,6 +388,7 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
     app.state.session_manager = session_manager
     app.state.broker = broker
     app.state.result_store = result_store
+    app.state.debug_events = debug_events
     app.add_event_handler("startup", broker.startup)
 
     if FRONTEND_DIR.exists():
@@ -546,6 +554,7 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
             ticket_id,
             broker,
             result_store,
+            debug_events,
         )
 
         return AskQuestionAcceptedResponse(
@@ -592,12 +601,14 @@ def create_app(config_path: str = "configs/dev.yaml") -> FastAPI:
     return app
 
 
-def _configure_logging() -> None:
+def _configure_logging(debug: bool) -> None:
     root_logger = logging.getLogger()
     if root_logger.handlers:
+        if debug:
+            root_logger.setLevel(logging.DEBUG)
         return
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if debug else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     )
 
@@ -615,6 +626,7 @@ def _process_question(
     ticket_id: str,
     broker: RealtimeBroker,
     result_store: ResultStore,
+    debug_events: bool,
 ) -> None:
     LOGGER.info(
         "Processing ticket %s for record_id=%s question=%s",
@@ -623,7 +635,12 @@ def _process_question(
         _truncate_for_log(str(scenario.get("question", ""))),
     )
     dependencies = build_dependencies(settings)
-    timeline = TimelineRecorder(events=[], broker=broker, ticket_id=ticket_id)
+    timeline = TimelineRecorder(
+        events=[],
+        broker=broker,
+        ticket_id=ticket_id,
+        debug_logging=debug_events,
+    )
     attach_timeline(dependencies, timeline)
     try:
         result = run_scenario(dependencies, scenario)
@@ -685,17 +702,27 @@ def main() -> None:
     parser.add_argument("--config", default="configs/dev.yaml", help="Path to configuration file")
     parser.add_argument("--host", default="127.0.0.1", help="Interface to bind the server")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind the server")
+    parser.add_argument(
+        "--debug-events",
+        action="store_true",
+        help="Log individual agent timeline events to the server logs",
+    )
     args = parser.parse_args()
 
-    _configure_logging()
-    app = create_app(config_path=args.config)
+    _configure_logging(debug=args.debug_events)
+    app = create_app(config_path=args.config, debug_events=args.debug_events)
 
     try:
         import uvicorn
     except ImportError as exc:  # pragma: no cover - defensive
         raise SystemExit("uvicorn must be installed to run the web frontend") from exc
 
-    LOGGER.info("Starting uvicorn on %s:%s", args.host, args.port)
+    LOGGER.info(
+        "Starting uvicorn on %s:%s (debug_events=%s)",
+        args.host,
+        args.port,
+        args.debug_events,
+    )
     uvicorn.run(app, host=args.host, port=args.port)
 
 
